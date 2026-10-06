@@ -65,7 +65,8 @@ interface RenderMetadata {
   asset: StorageAsset;
   filename: string;
   extension: string;
-  albumName: string | null;
+  /** Album hierarchy from root to the album itself, used for the `album` token. */
+  albumPath: string[];
   albumStartDate: Date | null;
   albumEndDate: Date | null;
   make: string | null;
@@ -118,7 +119,7 @@ export class StorageTemplateService extends BaseService {
         } as StorageAsset,
         filename: 'IMG_123',
         extension: 'jpg',
-        albumName: 'album',
+        albumPath: ['album'],
         albumStartDate: new Date(),
         albumEndDate: new Date(),
         make: 'FUJIFILM',
@@ -307,7 +308,7 @@ export class StorageTemplateService extends BaseService {
         }
       }
 
-      let albumName = null;
+      let albumPath: string[] = [];
       let albumStartDate = null;
       let albumEndDate = null;
       const assetForMetadata = stillPhoto || asset;
@@ -315,13 +316,26 @@ export class StorageTemplateService extends BaseService {
       if (this.template.needsAlbum) {
         // For motion videos, use the still photo's album information since motion videos
         // don't have album metadata attached directly
-        const albums = await this.albumRepository.getByAssetId(assetForMetadata.ownerId, assetForMetadata.id);
-        const album = albums?.[0];
-        if (album) {
-          albumName = album.albumName || null;
+        const albums = (await this.albumRepository.getByAssetId(assetForMetadata.ownerId, assetForMetadata.id)) ?? [];
+
+        // When an asset is in multiple albums, pick the album nested the deepest so that a
+        // sub-album wins over its ancestors, then use its full hierarchy (e.g. `二次元/nacho`)
+        // as the `{{album}}` value. `albums` is sorted by creation date desc, so ties keep the
+        // most recently created album.
+        const paths = await this.albumRepository.getAlbumPaths(albums.map((album) => album.id));
+        let selected: { album: (typeof albums)[number]; segments: string[] } | undefined;
+        for (const candidate of albums) {
+          const segments = paths.get(candidate.id) ?? [candidate.albumName];
+          if (!selected || segments.length > selected.segments.length) {
+            selected = { album: candidate, segments };
+          }
+        }
+
+        if (selected) {
+          albumPath = selected.segments.filter(Boolean);
 
           if (this.template.needsAlbumMetadata) {
-            const [metadata] = await this.albumRepository.getMetadataForIds([album.id]);
+            const [metadata] = await this.albumRepository.getMetadataForIds([selected.album.id]);
             albumStartDate = metadata?.startDate || null;
             albumEndDate = metadata?.endDate || null;
           }
@@ -334,7 +348,7 @@ export class StorageTemplateService extends BaseService {
         asset: assetForMetadata,
         filename: sanitized,
         extension,
-        albumName,
+        albumPath,
         albumStartDate,
         albumEndDate,
         make: assetForMetadata.make,
@@ -404,7 +418,7 @@ export class StorageTemplateService extends BaseService {
   }
 
   private render(template: HandlebarsTemplateDelegate<any>, options: RenderMetadata) {
-    const { filename, extension, asset, albumName, albumStartDate, albumEndDate, make, model, lensModel } = options;
+    const { filename, extension, asset, albumPath, albumStartDate, albumEndDate, make, model, lensModel } = options;
     const substitutions: Record<string, string> = {
       filename,
       ext: extension,
@@ -412,8 +426,12 @@ export class StorageTemplateService extends BaseService {
       filetypefull: asset.type === AssetType.Image ? 'IMAGE' : 'VIDEO',
       assetId: asset.id,
       assetIdShort: asset.id.slice(-12),
-      //just throw into the root if it doesn't belong to an album
-      album: (albumName && sanitize(albumName.replaceAll(/\.+/g, ''))) || '',
+      // just throw into the root if it doesn't belong to an album; each segment is sanitized on its
+      // own so that nested albums keep their path separator while names stay safe
+      album: albumPath
+        .map((segment) => sanitize(segment.replaceAll(/\.+/g, '')))
+        .filter(Boolean)
+        .join('/'),
       make: make ?? '',
       model: model ?? '',
       lensModel: lensModel ?? '',
@@ -423,7 +441,7 @@ export class StorageTemplateService extends BaseService {
 
     for (const token of Object.values(storageTokens).flat()) {
       substitutions[token] = dt.toFormat(token);
-      if (!albumName) {
+      if (albumPath.length === 0) {
         continue;
       }
 

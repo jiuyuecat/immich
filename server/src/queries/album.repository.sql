@@ -19,6 +19,7 @@ select
       (
         select
           "album_user"."role",
+          "album_user"."includeSubAlbums",
           (
             select
               to_json(obj)
@@ -98,6 +99,7 @@ select
       (
         select
           "album_user"."role",
+          "album_user"."includeSubAlbums",
           (
             select
               to_json(obj)
@@ -144,6 +146,46 @@ where
   and "album"."deletedAt" is null
 order by
   "album"."createdAt" desc
+
+-- AlbumRepository.getAlbumPaths
+with recursive
+  "album_path" (
+    "id",
+    "albumName",
+    "parentAlbumId",
+    "startId",
+    "distance"
+  ) as (
+    select
+      "album"."id",
+      "album"."albumName",
+      "album"."parentAlbumId",
+      "album"."id" as "startId",
+      0 as "distance"
+    from
+      "album"
+    where
+      "album"."id" in ($1)
+    union all
+    select
+      "album"."id",
+      "album"."albumName",
+      "album"."parentAlbumId",
+      "album_path"."startId",
+      album_path.distance + 1 as "distance"
+    from
+      "album"
+      inner join "album_path" on "album_path"."parentAlbumId" = "album"."id"
+  )
+select
+  "startId",
+  "albumName",
+  "distance"
+from
+  "album_path"
+order by
+  "startId",
+  "distance" desc
 
 -- AlbumRepository.getByAssetIds
 select
@@ -195,6 +237,7 @@ select
       (
         select
           "album_user"."role",
+          "album_user"."includeSubAlbums",
           (
             select
               to_json(obj)
@@ -332,7 +375,24 @@ with
     returning
       *
   ),
-  "album_user" as (
+  "created_album_closures" as (
+    insert into
+      "album_closure" ("id_ancestor", "id_descendant")
+    select
+      "album"."id" as "id_ancestor",
+      "album"."id" as "id_descendant"
+    from
+      "album"
+    union all
+    select
+      "album_closure"."id_ancestor",
+      "album"."id" as "id_descendant"
+    from
+      "album"
+      inner join "album_closure" on "album_closure"."id_descendant" = "album"."parentAlbumId"
+    on conflict do nothing
+  ),
+  "created_album_user" as (
     insert into
       "album_user"
     select
@@ -346,7 +406,7 @@ with
       "album_user"."userId",
       "album_user"."role"
   ),
-  "album_asset" as (
+  "created_album_asset" as (
     insert into
       "album_asset"
     select
@@ -368,6 +428,7 @@ select
       (
         select
           "album_user"."role",
+          "album_user"."includeSubAlbums",
           (
             select
               to_json(obj)
@@ -419,6 +480,99 @@ select
   ) as "assets"
 from
   "album"
+
+-- AlbumRepository.isInSubtree
+select
+  "id_descendant"
+from
+  "album_closure"
+where
+  "id_ancestor" = $1
+  and "id_descendant" = $2
+
+-- AlbumRepository.getChildren
+select
+  "album".*,
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "album_user"."role",
+          "album_user"."includeSubAlbums",
+          (
+            select
+              to_json(obj)
+            from
+              (
+                select
+                  "id",
+                  "name",
+                  "email",
+                  "avatarColor",
+                  "profileImagePath",
+                  "profileChangedAt"
+                from
+                  (
+                    select
+                      1
+                  ) as "dummy"
+              ) as obj
+          ) as "user"
+        from
+          "album_user"
+          inner join "user" on "user"."id" = "album_user"."userId"
+        where
+          "album_user"."albumId" = "album"."id"
+        order by
+          "album_user"."role",
+          "album_user"."userId" = $1 desc,
+          "user"."name" asc
+      ) as agg
+  ) as "albumUsers",
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "shared_link".*
+        from
+          "shared_link"
+        where
+          "shared_link"."albumId" = "album"."id"
+      ) as agg
+  ) as "sharedLinks"
+from
+  "album"
+where
+  "album"."parentAlbumId" = $2
+  and "album"."deletedAt" is null
+  and (
+    exists (
+      select
+      from
+        "album_user"
+      where
+        "album_user"."albumId" = "album"."id"
+        and "album_user"."userId" = $3
+    )
+    or exists (
+      select
+      from
+        "album_closure" as "ac"
+        inner join "album_user" as "au" on "au"."albumId" = "ac"."id_ancestor"
+        inner join "album" as "grantAlbum" on "grantAlbum"."id" = "ac"."id_ancestor"
+      where
+        "ac"."id_descendant" = "album"."id"
+        and "au"."userId" = $4
+        and "au"."includeSubAlbums" = $5
+        and "grantAlbum"."deletedAt" is null
+    )
+  )
+order by
+  "album"."createdAt" desc
 
 -- AlbumRepository.getContributorCounts
 select

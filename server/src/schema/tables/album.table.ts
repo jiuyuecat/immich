@@ -1,4 +1,5 @@
 import {
+  Check,
   Column,
   CreateDateColumn,
   DeleteDateColumn,
@@ -15,6 +16,7 @@ import { AssetTable } from 'src/schema/tables/asset.table.js';
 
 @Table({ name: 'album' })
 @UpdatedAtTrigger('album_updatedAt')
+@Check({ name: 'album_parentAlbumId_chk', expression: `"parentAlbumId" != "id"` })
 export class AlbumTable {
   @PrimaryGeneratedColumn()
   id!: Generated<string>;
@@ -47,6 +49,14 @@ export class AlbumTable {
 
   @Column({ default: AssetOrder.Desc })
   order!: Generated<AssetOrder>;
+
+  @ForeignKeyColumn(() => AlbumTable, {
+    nullable: true,
+    onDelete: 'CASCADE',
+    onUpdate: 'NO ACTION',
+    comment: 'Parent album ID for nested albums',
+  })
+  parentAlbumId!: string | null;
 
   @UpdateIdColumn({ index: true })
   updateId!: Generated<string>;

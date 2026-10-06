@@ -59,6 +59,9 @@ export class AlbumUserTable {
   @Column({ enum: album_user_role_enum, default: AlbumUserRole.Editor })
   role!: Generated<AlbumUserRole>;
 
+  @Column({ type: 'boolean', default: false })
+  includeSubAlbums!: Generated<boolean>;
+
   @CreateIdColumn({ index: true })
   createId!: Generated<string>;
 

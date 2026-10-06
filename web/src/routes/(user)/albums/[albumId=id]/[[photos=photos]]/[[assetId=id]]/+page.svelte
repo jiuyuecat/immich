@@ -66,6 +66,7 @@
   import type { PageData } from './$types';
   import AlbumDescription from './AlbumDescription.svelte';
   import AlbumTitle from './AlbumTitle.svelte';
+  import SubAlbums from '$lib/components/album-page/SubAlbums.svelte';
   import ActionMenuItem from '$lib/components/ActionMenuItem.svelte';
   import { delay } from '$lib/utils/asset-utils';
 
@@ -360,6 +361,23 @@
           {#if viewMode !== AlbumPageViewMode.SELECT_THUMBNAIL}
             <!-- ALBUM TITLE -->
             <section class="pt-8 md:pt-24">
+              {#if data.ancestors.length > 0}
+                <nav class="mb-1 flex flex-wrap items-center gap-x-1 text-sm" data-testid="album-breadcrumb">
+                  <a href={Route.albums()} class="text-gray-500 hover:text-primary dark:text-immich-dark-fg">
+                    {$t('albums')}
+                  </a>
+                  {#each data.ancestors as ancestor (ancestor.id)}
+                    <span class="text-gray-400">/</span>
+                    <a
+                      href={Route.viewAlbum(ancestor)}
+                      class="text-gray-500 hover:text-primary dark:text-immich-dark-fg"
+                    >
+                      {ancestor.albumName}
+                    </a>
+                  {/each}
+                </nav>
+              {/if}
+
               <AlbumTitle
                 id={album.id}
                 albumName={album.albumName}
@@ -414,6 +432,8 @@
                 {isEditor}
                 bind:description={() => album.description, (description) => (album = { ...album, description })}
               />
+
+              <SubAlbums albums={data.childAlbums} parentAlbum={album} canEdit={isOwned} />
             </section>
           {/if}
 
@@ -549,6 +569,7 @@
                   />
                 {/if}
                 <ActionMenuItem action={Actions.Options} />
+                <ActionMenuItem action={Actions.Move} />
                 {#if isOwned && album.assetCount > 0}
                   <MenuOption
                     icon={mdiImageOutline}

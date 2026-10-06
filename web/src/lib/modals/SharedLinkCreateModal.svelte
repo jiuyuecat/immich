@@ -21,6 +21,7 @@
   let password = $state('');
   let slug = $state('');
   let expiresAt = $state<string | null>(null);
+  let includeSubAlbums = $state(false);
 
   let type = $derived(albumId ? SharedLinkType.Album : SharedLinkType.Individual);
 
@@ -36,6 +37,7 @@
       allowDownload,
       showMetadata,
       slug,
+      includeSubAlbums,
     });
     if (success) {
       onClose();
@@ -67,5 +69,7 @@
     bind:allowUpload
     bind:showMetadata
     bind:expiresAt
+    bind:includeSubAlbums
+    showIncludeSubAlbums={type === SharedLinkType.Album}
   />
 </FormModal>

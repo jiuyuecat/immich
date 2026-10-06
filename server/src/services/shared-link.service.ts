@@ -100,6 +100,7 @@ export class SharedLinkService extends BaseService {
         allowUpload: dto.allowUpload ?? true,
         allowDownload: dto.showMetadata !== false && (dto.allowDownload ?? true),
         showExif: dto.showMetadata ?? true,
+        includeSubAlbums: dto.includeSubAlbums ?? false,
         slug: dto.slug || null,
       });
 
@@ -129,6 +130,7 @@ export class SharedLinkService extends BaseService {
         allowUpload: dto.allowUpload,
         allowDownload: dto.allowDownload,
         showExif: dto.showMetadata,
+        includeSubAlbums: dto.includeSubAlbums,
         slug: dto.slug || null,
       });
       return mapSharedLink(sharedLink, { stripAssetMetadata: false });

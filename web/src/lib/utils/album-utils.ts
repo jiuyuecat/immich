@@ -22,12 +22,13 @@ import { handleError } from '$lib/utils/handle-error';
  * Albums General Management
  * -------------------------
  */
-export const createAlbum = async (name?: string, assetIds?: string[]) => {
+export const createAlbum = async (name?: string, assetIds?: string[], parentAlbumId?: string) => {
   try {
     const newAlbum: AlbumResponseDto = await sdk.createAlbum({
       createAlbumDto: {
         albumName: name ?? '',
         assetIds,
+        parentAlbumId,
       },
     });
     eventManager.emit('AlbumCreate', newAlbum);
@@ -38,11 +39,66 @@ export const createAlbum = async (name?: string, assetIds?: string[]) => {
   }
 };
 
-export const createAlbumAndRedirect = async (name?: string, assetIds?: string[]) => {
-  const newAlbum = await createAlbum(name, assetIds);
+export const createAlbumAndRedirect = async (name?: string, assetIds?: string[], parentAlbumId?: string) => {
+  const newAlbum = await createAlbum(name, assetIds, parentAlbumId);
   if (newAlbum) {
     await goto(Route.viewAlbum(newAlbum));
   }
+};
+
+/**
+ * ---------------------------------
+ * Nested Albums (Album Hierarchies)
+ * ---------------------------------
+ */
+export const getChildAlbums = (albums: AlbumResponseDto[], parentId: string | null): AlbumResponseDto[] =>
+  albums.filter((album) => album.parentAlbumId === parentId);
+
+/** Direct children grouped by parent album id. */
+export const groupAlbumsByParent = (albums: AlbumResponseDto[]): Map<string, AlbumResponseDto[]> => {
+  const groups = new Map<string, AlbumResponseDto[]>();
+  for (const album of albums) {
+    if (!album.parentAlbumId) {
+      continue;
+    }
+    const siblings = groups.get(album.parentAlbumId) ?? [];
+    siblings.push(album);
+    groups.set(album.parentAlbumId, siblings);
+  }
+  return groups;
+};
+
+/** The album and its ancestors, ordered from the root down to the album itself. */
+export const getAlbumPath = (albums: AlbumResponseDto[], albumId: string): AlbumResponseDto[] => {
+  const byId = new Map(albums.map((album) => [album.id, album]));
+  const path: AlbumResponseDto[] = [];
+  const seen = new Set<string>();
+
+  let current = byId.get(albumId);
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    path.unshift(current);
+    current = current.parentAlbumId ? byId.get(current.parentAlbumId) : undefined;
+  }
+
+  return path;
+};
+
+/** The ids of `albumId` and every album nested below it. */
+export const getSubtreeIds = (albums: AlbumResponseDto[], albumId: string): Set<string> => {
+  const childrenByParent = groupAlbumsByParent(albums);
+  const result = new Set<string>([albumId]);
+  const stack = [albumId];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    for (const child of childrenByParent.get(current) ?? []) {
+      if (!result.has(child.id)) {
+        result.add(child.id);
+        stack.push(child.id);
+      }
+    }
+  }
+  return result;
 };
 
 /**

@@ -260,10 +260,13 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
 
     case Permission.AlbumShare: {
       const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids);
+      // sharing is intentionally not inherited: an editor granted access to an album via a parent's
+      // `includeSubAlbums` share must not be able to re-share that album with someone else
       const isShared = await access.album.checkSharedAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         AlbumUserRole.Editor,
+        false,
       );
       return setUnion(isOwner, isShared);
     }

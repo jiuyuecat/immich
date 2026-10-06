@@ -15,6 +15,10 @@ const AlbumUserAddSchema = z
   .object({
     userId: z.uuidv4().describe('User ID'),
     role: AlbumUserRoleSchema.default(AlbumUserRole.Editor).optional().describe('Album user role'),
+    includeSubAlbums: z
+      .boolean()
+      .optional()
+      .describe('Also grant this user access to the album’s sub-albums (recursively)'),
   })
   .meta({ id: 'AlbumUserAddDto' });
 
@@ -52,6 +56,7 @@ const CreateAlbumSchema = z
       }),
     albumUsers: z.array(AlbumUserCreateSchema).optional().describe('Album users'),
     assetIds: z.array(z.uuidv4()).optional().describe('Initial asset IDs'),
+    parentAlbumId: z.uuidv4().optional().describe('Parent album ID to nest this album under'),
   })
   .meta({ id: 'CreateAlbumDto' });
 
@@ -91,6 +96,11 @@ const UpdateAlbumSchema = z
     albumThumbnailAssetId: z.uuidv4().optional().describe('Album thumbnail asset ID'),
     isActivityEnabled: z.boolean().optional().describe('Enable activity feed'),
     order: AssetOrderSchema.optional(),
+    parentAlbumId: z
+      .uuidv4()
+      .nullable()
+      .optional()
+      .describe('Parent album ID to move this album under, or null to move it to the top level'),
   })
   .meta({ id: 'UpdateAlbumDto' });
 
@@ -105,6 +115,10 @@ const GetAlbumsSchema = z
       .optional()
       .describe('Filter by shared status: true = only shared, false = not shared, undefined = no filter'),
     assetId: z.uuidv4().optional().describe('Filter albums containing this asset ID (ignores other parameters)'),
+    parentId: z.uuidv4().optional().describe('Return the direct sub-albums of this album ID'),
+    rootOnly: stringToBool
+      .optional()
+      .describe('Return only top-level albums (albums without an accessible parent album)'),
   })
   .meta({ id: 'GetAlbumsDto' });
 
@@ -119,6 +133,10 @@ const AlbumStatisticsResponseSchema = z
 const UpdateAlbumUserSchema = z
   .object({
     role: AlbumUserRoleSchema,
+    includeSubAlbums: z
+      .boolean()
+      .optional()
+      .describe('Also grant this user access to the album’s sub-albums (recursively)'),
   })
   .meta({ id: 'UpdateAlbumUserDto' });
 
@@ -126,6 +144,7 @@ const AlbumUserResponseSchema = z
   .object({
     user: UserResponseSchema,
     role: AlbumUserRoleSchema,
+    includeSubAlbums: z.boolean().describe('Whether this user also has access to the album’s sub-albums'),
   })
   .meta({ id: 'AlbumUserResponseDto' });
 
@@ -186,6 +205,7 @@ export const AlbumResponseSchema = z
       .describe('UTC representation of (local) end date (latest asset)'),
     isActivityEnabled: z.boolean().describe('Activity feed enabled'),
     order: AssetOrderSchema.optional(),
+    parentAlbumId: z.uuidv4().nullable().describe('Parent album ID, or null for a top-level album'),
     contributorCounts: z.array(ContributorCountResponseSchema).optional(),
   })
   .meta({ id: 'AlbumResponseDto' });
@@ -227,6 +247,7 @@ export type MapAlbumDto = {
   id: string;
   isActivityEnabled: boolean;
   order: AssetOrder;
+  parentAlbumId: string | null;
 };
 
 export const mapAlbum = (entity: MaybeDehydrated<MapAlbumDto>): AlbumResponseDto => {
@@ -238,6 +259,7 @@ export const mapAlbum = (entity: MaybeDehydrated<MapAlbumDto>): AlbumResponseDto
       albumUsers.push({
         user,
         role: albumUser.role,
+        includeSubAlbums: albumUser.includeSubAlbums,
       });
     }
   }
@@ -270,5 +292,6 @@ export const mapAlbum = (entity: MaybeDehydrated<MapAlbumDto>): AlbumResponseDto
     assetCount: entity.assets?.length || 0,
     isActivityEnabled: entity.isActivityEnabled,
     order: entity.order,
+    parentAlbumId: entity.parentAlbumId,
   };
 };

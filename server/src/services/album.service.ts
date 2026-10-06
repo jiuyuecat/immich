@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import type { Updateable } from 'kysely';
 import {
   AddUsersDto,
   AlbumResponseDto,
@@ -7,6 +8,7 @@ import {
   AlbumsAddAssetsResponseDto,
   CreateAlbumDto,
   GetAlbumsDto,
+  type MapAlbumDto,
   UpdateAlbumDto,
   UpdateAlbumUserDto,
   mapAlbum,
@@ -16,6 +18,7 @@ import { AuthDto } from 'src/dtos/auth.dto.js';
 import { MapMarkerResponseDto } from 'src/dtos/map.dto.js';
 import { AlbumUserRole, Permission } from 'src/enum.js';
 import { AlbumAssetCount, AlbumInfoOptions } from 'src/repositories/album.repository.js';
+import { AlbumUserTable } from 'src/schema/tables/album-user.table.js';
 import { BaseService } from 'src/services/base.service.js';
 import { addAssets, removeAssets } from 'src/utils/asset.util.js';
 import { asDateTimeString } from 'src/utils/date.js';
@@ -38,12 +41,19 @@ export class AlbumService extends BaseService {
     };
   }
 
-  async getAll({ user: { id: ownerId } }: AuthDto, { assetId, ...rest }: GetAlbumsDto): Promise<AlbumResponseDto[]> {
+  async getAll(auth: AuthDto, { assetId, parentId, rootOnly, ...rest }: GetAlbumsDto): Promise<AlbumResponseDto[]> {
+    const ownerId = auth.user.id;
     await this.albumRepository.updateThumbnails();
 
-    const albums = assetId
-      ? await this.albumRepository.getByAssetId(ownerId, assetId)
-      : await this.albumRepository.getAll(ownerId, rest);
+    let albums: MapAlbumDto[];
+    if (assetId) {
+      albums = await this.albumRepository.getByAssetId(ownerId, assetId);
+    } else if (parentId) {
+      await this.requireAccess({ auth, permission: Permission.AlbumRead, ids: [parentId] });
+      albums = await this.albumRepository.getChildren(ownerId, parentId);
+    } else {
+      albums = await this.albumRepository.getAll(ownerId, { ...rest, rootOnly });
+    }
 
     if (albums.length === 0) {
       return [];
@@ -118,12 +128,20 @@ export class AlbumService extends BaseService {
 
     const userMetadata = await this.userRepository.getMetadata(auth.user.id);
 
+    if (dto.parentAlbumId) {
+      const ownedIds = await this.accessRepository.album.checkOwnerAccess(auth.user.id, new Set([dto.parentAlbumId]));
+      if (!ownedIds.has(dto.parentAlbumId)) {
+        throw new BadRequestException('Invalid parent album');
+      }
+    }
+
     const album = await this.albumRepository.create(
       {
         albumName: dto.albumName,
         description: dto.description,
         albumThumbnailAssetId: assetIds[0] || null,
         order: getPreferences(userMetadata).albums.defaultAssetOrder,
+        parentAlbumId: dto.parentAlbumId ?? null,
       },
       assetIds,
       [{ userId: auth.user.id, role: AlbumUserRole.Owner }, ...albumUsers],
@@ -139,6 +157,10 @@ export class AlbumService extends BaseService {
 
   async update(auth: AuthDto, id: string, dto: UpdateAlbumDto): Promise<AlbumResponseDto> {
     await this.requireAccess({ auth, permission: Permission.AlbumUpdate, ids: [id] });
+
+    if (dto.parentAlbumId !== undefined) {
+      await this.moveAlbum(auth, id, dto.parentAlbumId);
+    }
 
     const album = await this.findOrFail(id, auth.user.id, { withAssets: true });
 
@@ -167,6 +189,34 @@ export class AlbumService extends BaseService {
   async delete(auth: AuthDto, id: string): Promise<void> {
     await this.requireAccess({ auth, permission: Permission.AlbumDelete, ids: [id] });
     await this.albumRepository.delete(id);
+  }
+
+  private async moveAlbum(auth: AuthDto, id: string, parentAlbumId: string | null): Promise<void> {
+    const idsToOwn = parentAlbumId ? [id, parentAlbumId] : [id];
+    const ownedIds = await this.accessRepository.album.checkOwnerAccess(auth.user.id, new Set(idsToOwn));
+    for (const ownedId of idsToOwn) {
+      if (!ownedIds.has(ownedId)) {
+        throw new BadRequestException('Invalid album');
+      }
+    }
+
+    if (parentAlbumId) {
+      if (await this.albumRepository.isInSubtree(id, parentAlbumId)) {
+        throw new BadRequestException('Cannot move an album into its own sub-tree');
+      }
+
+      // keep an album's owner identical across the whole tree: otherwise deleting a parent album
+      // would cascade-delete albums owned by other users
+      const album = await this.findOrFail(id, auth.user.id, { withAssets: false });
+      const parent = await this.findOrFail(parentAlbumId, auth.user.id, { withAssets: false });
+      const albumOwner = album.albumUsers?.find(({ role }) => role === AlbumUserRole.Owner)?.user.id;
+      const parentOwner = parent.albumUsers?.find(({ role }) => role === AlbumUserRole.Owner)?.user.id;
+      if (albumOwner !== parentOwner) {
+        throw new BadRequestException('Cannot move an album under an album owned by another user');
+      }
+    }
+
+    await this.albumRepository.move(id, parentAlbumId);
   }
 
   async addAssets(auth: AuthDto, id: string, dto: BulkIdsDto): Promise<BulkIdResponseDto[]> {
@@ -289,7 +339,7 @@ export class AlbumService extends BaseService {
 
     const album = await this.findOrFail(id, auth.user.id, { withAssets: false });
 
-    for (const { userId, role } of albumUsers) {
+    for (const { userId, role, includeSubAlbums } of albumUsers) {
       if (role === AlbumUserRole.Owner) {
         throw new BadRequestException('Cannot add another owner');
       }
@@ -305,7 +355,12 @@ export class AlbumService extends BaseService {
         throw new BadRequestException('Invalid user');
       }
 
-      await this.albumUserRepository.create({ userId, albumId: id, role });
+      await this.albumUserRepository.create({
+        userId,
+        albumId: id,
+        role,
+        includeSubAlbums,
+      });
       await this.eventRepository.emit('AlbumInvite', { id, userId, senderName: auth.user.name });
     }
 
@@ -349,7 +404,12 @@ export class AlbumService extends BaseService {
       throw new BadRequestException('User is owner');
     }
 
-    await this.albumUserRepository.update({ albumId: id, userId }, { role: dto.role });
+    const update: Updateable<AlbumUserTable> = { role: dto.role };
+    if (dto.includeSubAlbums !== undefined) {
+      update.includeSubAlbums = dto.includeSubAlbums;
+    }
+
+    await this.albumUserRepository.update({ albumId: id, userId }, update);
   }
 
   private findOrFail(id: string, authUserId: string, options: AlbumInfoOptions) {

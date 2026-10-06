@@ -30,6 +30,10 @@ const SharedLinkCreateSchema = z
     allowUpload: z.boolean().optional().describe('Allow uploads'),
     allowDownload: z.boolean().default(true).optional().describe('Allow downloads'),
     showMetadata: z.boolean().default(true).optional().describe('Show metadata'),
+    includeSubAlbums: z
+      .boolean()
+      .optional()
+      .describe('Also grant access to the linked album’s sub-albums (recursively)'),
   })
   .superRefine(({ type, albumId, assetIds }, ctx) => {
     switch (type) {
@@ -65,6 +69,10 @@ const SharedLinkEditSchema = z
     allowUpload: z.boolean().optional().describe('Allow uploads'),
     allowDownload: z.boolean().optional().describe('Allow downloads'),
     showMetadata: z.boolean().optional().describe('Show metadata'),
+    includeSubAlbums: z
+      .boolean()
+      .optional()
+      .describe('Also grant access to the linked album’s sub-albums (recursively)'),
   })
   .meta({ id: 'SharedLinkEditDto' });
 
@@ -89,6 +97,7 @@ const SharedLinkResponseSchema = z
     allowUpload: z.boolean().describe('Allow uploads'),
     allowDownload: z.boolean().describe('Allow downloads'),
     showMetadata: z.boolean().describe('Show metadata'),
+    includeSubAlbums: z.boolean().describe('Whether the linked album’s sub-albums are also shared'),
     slug: z.string().nullable().describe('Custom URL slug'),
   })
   .describe('Shared link response')
@@ -117,6 +126,7 @@ export function mapSharedLink(sharedLink: SharedLink, options: { stripAssetMetad
     allowUpload: sharedLink.allowUpload,
     allowDownload: sharedLink.allowDownload,
     showMetadata: sharedLink.showExif,
+    includeSubAlbums: sharedLink.includeSubAlbums,
     slug: sharedLink.slug,
   };
 

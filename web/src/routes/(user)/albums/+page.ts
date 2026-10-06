@@ -5,8 +5,9 @@ import type { PageLoad } from './$types';
 
 export const load = (async ({ url }) => {
   await authenticate(url);
-  const sharedAlbums = await getAllAlbums({ isShared: true });
-  const albums = await getAllAlbums({ isOwned: true });
+  // only top-level (root) albums are listed; sub-albums are shown inside their parent album
+  const sharedAlbums = await getAllAlbums({ isShared: true, rootOnly: true });
+  const albums = await getAllAlbums({ isOwned: true, rootOnly: true });
   const $t = await getFormatter();
 
   return {

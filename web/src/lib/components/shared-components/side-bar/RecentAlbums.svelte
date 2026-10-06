@@ -10,7 +10,8 @@
 
   const refreshAlbums = async () => {
     try {
-      const allAlbums = await getAllAlbums({});
+      // only show top-level albums; sub-albums are reached through their parent
+      const allAlbums = await getAllAlbums({ rootOnly: true });
       albums = allAlbums.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 3);
       userInteraction.recentAlbums = albums;
     } catch (error) {

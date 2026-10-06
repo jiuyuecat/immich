@@ -28,7 +28,7 @@ The `Storage Template Migration` job can be run after enabling this feature or c
 :::
 
 :::tip
-If an asset is in multiple albums, `{{album}}` will be set to the name of the album which was most recently created. By default, special characters will be converted to an HTML entity (for example, `&` -> `&amp;`). To prevent this, wrap the variable in an extra set of braces (for example, `{{{album}}}`). You can learn more about this [here](https://handlebarsjs.com/guide/expressions.html#html-escaping) and [here](https://github.com/immich-app/immich/issues/4917).
+`{{album}}` expands to the album's full hierarchy, so an album nested inside another album is rendered as a path: a sub-album `nacho` inside `二次元` becomes `二次元/nacho`. If an asset is in multiple albums, the album nested the deepest wins; ties keep the most recently created album. By default, special characters will be converted to an HTML entity (for example, `&` -> `&amp;`). To prevent this, wrap the variable in an extra set of braces (for example, `{{{album}}}`). You can learn more about this [here](https://handlebarsjs.com/guide/expressions.html#html-escaping) and [here](https://github.com/immich-app/immich/issues/4917).
 :::
 
 Immich also provides a mechanism to migrate between templates so that if the template you set now doesn't work in the future, you can always migrate all the existing files to the new template. The mechanism is run as a job on the Job page.

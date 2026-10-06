@@ -15,5 +15,6 @@ export const sharedLinkFactory = Sync.makeFactory<SharedLinkResponseDto>({
   allowUpload: Sync.each(() => faker.datatype.boolean()),
   allowDownload: Sync.each(() => faker.datatype.boolean()),
   showMetadata: Sync.each(() => faker.datatype.boolean()),
+  includeSubAlbums: false,
   slug: null,
 });

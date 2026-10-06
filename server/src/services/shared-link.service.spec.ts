@@ -157,6 +157,7 @@ describe(SharedLinkService.name, () => {
         expiresAt: null,
         slug: null,
         showExif: true,
+        includeSubAlbums: false,
         key: Buffer.from('random-bytes', 'utf8'),
       });
     });
@@ -193,6 +194,7 @@ describe(SharedLinkService.name, () => {
         description: null,
         expiresAt: null,
         showExif: true,
+        includeSubAlbums: false,
         key: Buffer.from('random-bytes', 'utf8'),
       });
     });
@@ -228,6 +230,7 @@ describe(SharedLinkService.name, () => {
         description: null,
         expiresAt: null,
         showExif: false,
+        includeSubAlbums: false,
         slug: null,
         key: Buffer.from('random-bytes', 'utf8'),
       });

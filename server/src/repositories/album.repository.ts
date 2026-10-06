@@ -39,6 +39,7 @@ const withAlbumUsers = (authUserId?: string) => (eb: ExpressionBuilder<DB, 'albu
       .innerJoin('user', 'user.id', 'album_user.userId')
       .whereRef('album_user.albumId', '=', 'album.id')
       .select('album_user.role')
+      .select('album_user.includeSubAlbums')
       .select((eb) => jsonObjectFrom(eb.selectFrom(dummy).select(columns.user)).$notNull().as('user'))
       .orderBy('album_user.role')
       .$if(!!authUserId, (qb) => qb.orderBy((eb) => eb('album_user.userId', '=', authUserId!), 'desc'))
@@ -82,6 +83,36 @@ const isAlbumOwned = (ownerId: string) => (eb: ExpressionBuilder<DB, 'album'>) =
       .where('album_user.userId', '=', ownerId),
   );
 
+/**
+ * Whether the user has *any* access (direct membership, or inherited from a shared ancestor
+ * with `includeSubAlbums` enabled) to the given album id column.
+ *
+ * Used for browsing (listing children / roots) where the specific role is irrelevant, unlike
+ * {@link AlbumAccess} which is role-sensitive.
+ */
+const hasAlbumAccess =
+  (userId: string, albumIdColumn: 'album.id' | 'album.parentAlbumId') => (eb: ExpressionBuilder<DB, 'album'>) =>
+    eb.or([
+      // direct membership
+      eb.exists(
+        eb
+          .selectFrom('album_user')
+          .whereRef('album_user.albumId', '=', albumIdColumn)
+          .where('album_user.userId', '=', userId),
+      ),
+      // inherited from an ancestor shared with `includeSubAlbums`
+      eb.exists(
+        eb
+          .selectFrom('album_closure as ac')
+          .innerJoin('album_user as au', 'au.albumId', 'ac.id_ancestor')
+          .innerJoin('album as grantAlbum', 'grantAlbum.id', 'ac.id_ancestor')
+          .whereRef('ac.id_descendant', '=', albumIdColumn)
+          .where('au.userId', '=', userId)
+          .where('au.includeSubAlbums', '=', true)
+          .where('grantAlbum.deletedAt', 'is', null),
+      ),
+    ]);
+
 @Injectable()
 export class AlbumRepository {
   constructor(@InjectKysely() private db: Kysely<DB>) {}
@@ -120,6 +151,53 @@ export class AlbumRepository {
       .select(withAlbumUsers(ownerId))
       .orderBy('album.createdAt', 'desc')
       .execute();
+  }
+
+  /**
+   * For each given album id, resolve its full hierarchy as a list of album names ordered
+   * root -> album (e.g. `['二次元', 'nacho']`). A top-level album yields a single entry.
+   */
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  @ChunkedArray()
+  async getAlbumPaths(albumIds: string[]): Promise<Map<string, string[]>> {
+    if (albumIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.db
+      // walk up the parent chain from each requested album
+      .withRecursive('album_path(id, albumName, parentAlbumId, startId, distance)', (qb) => {
+        const startingAlbum = qb
+          .selectFrom('album')
+          .select(['album.id', 'album.albumName', 'album.parentAlbumId'])
+          .select('album.id as startId')
+          .select(sql<number>`0`.as('distance'))
+          .where('album.id', 'in', albumIds);
+
+        const parentAlbum = qb
+          .selectFrom('album')
+          .innerJoin('album_path', 'album_path.parentAlbumId', 'album.id')
+          .select(['album.id', 'album.albumName', 'album.parentAlbumId'])
+          .select('album_path.startId')
+          .select(sql<number>`album_path.distance + 1`.as('distance'));
+
+        return startingAlbum.unionAll(parentAlbum);
+      })
+      .selectFrom('album_path')
+      .select(['startId', 'albumName', 'distance'])
+      .orderBy('startId')
+      // distance 0 is the album itself and grows towards the root, so descending gives root -> album
+      .orderBy('distance', 'desc')
+      .execute();
+
+    const paths = new Map<string, string[]>();
+    for (const row of rows) {
+      const path = paths.get(row.startId) ?? [];
+      path.push(row.albumName);
+      paths.set(row.startId, path);
+    }
+
+    return paths;
   }
 
   @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
@@ -183,35 +261,46 @@ export class AlbumRepository {
     );
   }
 
-  private buildAlbumBaseQuery(ownerId: string, { isOwned, isShared }: { isOwned?: boolean; isShared?: boolean }) {
-    return this.db
-      .selectFrom('album')
-      .innerJoin('album_user', (join) =>
-        join.onRef('album_user.albumId', '=', 'album.id').on('album_user.userId', '=', ownerId),
-      )
-      .where('album.deletedAt', 'is', null)
-      .$if(isOwned === true, (qb) => qb.where('album_user.role', '=', sql.lit(AlbumUserRole.Owner)))
-      .$if(isOwned === false, (qb) => qb.where('album_user.role', '!=', sql.lit(AlbumUserRole.Owner)))
-      .$if(isShared !== undefined, (qb) =>
-        qb.where((eb) => {
-          const isSharedAlbum = eb.or([
-            eb.exists(
-              eb
-                .selectFrom('album_user as au')
-                .whereRef('au.albumId', '=', 'album.id')
-                .where('au.role', '!=', sql.lit(AlbumUserRole.Owner)),
-            ),
-            eb.exists(eb.selectFrom('shared_link').whereRef('shared_link.albumId', '=', 'album.id')),
-          ]);
-          return isShared ? isSharedAlbum : eb.not(isSharedAlbum);
-        }),
-      );
+  private buildAlbumBaseQuery(
+    ownerId: string,
+    { isOwned, isShared, rootOnly }: { isOwned?: boolean; isShared?: boolean; rootOnly?: boolean },
+  ) {
+    return (
+      this.db
+        .selectFrom('album')
+        .innerJoin('album_user', (join) =>
+          join.onRef('album_user.albumId', '=', 'album.id').on('album_user.userId', '=', ownerId),
+        )
+        .where('album.deletedAt', 'is', null)
+        .$if(isOwned === true, (qb) => qb.where('album_user.role', '=', sql.lit(AlbumUserRole.Owner)))
+        .$if(isOwned === false, (qb) => qb.where('album_user.role', '!=', sql.lit(AlbumUserRole.Owner)))
+        // "relative root": the album has no parent, or its parent is not accessible to this user
+        .$if(!!rootOnly, (qb) =>
+          qb.where((eb) =>
+            eb.or([eb('album.parentAlbumId', 'is', null), eb.not(hasAlbumAccess(ownerId, 'album.parentAlbumId')(eb))]),
+          ),
+        )
+        .$if(isShared !== undefined, (qb) =>
+          qb.where((eb) => {
+            const isSharedAlbum = eb.or([
+              eb.exists(
+                eb
+                  .selectFrom('album_user as au')
+                  .whereRef('au.albumId', '=', 'album.id')
+                  .where('au.role', '!=', sql.lit(AlbumUserRole.Owner)),
+              ),
+              eb.exists(eb.selectFrom('shared_link').whereRef('shared_link.albumId', '=', 'album.id')),
+            ]);
+            return isShared ? isSharedAlbum : eb.not(isSharedAlbum);
+          }),
+        )
+    );
   }
 
   @GenerateSql({ params: [DummyValue.UUID, { isOwned: true, isShared: true }] })
   getAll(
     ownerId: string,
-    options: { id?: string; isOwned?: boolean; isShared?: boolean; name?: string } = {},
+    options: { id?: string; isOwned?: boolean; isShared?: boolean; name?: string; rootOnly?: boolean } = {},
   ): Promise<MapAlbumDto[]> {
     return this.buildAlbumBaseQuery(ownerId, options)
       .selectAll('album')
@@ -323,7 +412,27 @@ export class AlbumRepository {
 
     const result = await this.db
       .with('album', (db) => db.insertInto('album').values(album).returningAll())
-      .with('album_user', (db) =>
+      .with('created_album_closures', (db) =>
+        db
+          .insertInto('album_closure')
+          .columns(['id_ancestor', 'id_descendant'])
+          .expression((eb) =>
+            eb
+              .selectFrom('album')
+              .select(['album.id as id_ancestor', 'album.id as id_descendant'])
+              .unionAll(
+                eb
+                  .selectFrom('album')
+                  .innerJoin('album_closure', 'album_closure.id_descendant', 'album.parentAlbumId')
+                  .select(['album_closure.id_ancestor', 'album.id as id_descendant']),
+              ),
+          )
+          .onConflict((oc) => oc.doNothing()),
+      )
+      // NOTE: the CTEs are deliberately not named `album_user`/`album_asset`. A CTE shadows a table
+      // of the same name for the whole statement, which would make the `withAlbumUsers`/`withAssets`
+      // sub-queries below read the CTE instead of the real tables.
+      .with('created_album_user', (db) =>
         db
           .insertInto('album_user')
           .expression((eb) =>
@@ -337,7 +446,7 @@ export class AlbumRepository {
           )
           .returning(['album_user.albumId', 'album_user.userId', 'album_user.role']),
       )
-      .with('album_asset', (db) =>
+      .with('created_album_asset', (db) =>
         db
           .insertInto('album_asset')
           .expression((eb) =>
@@ -371,6 +480,84 @@ export class AlbumRepository {
 
   async delete(id: string): Promise<void> {
     await this.db.deleteFrom('album').where('id', '=', id).execute();
+  }
+
+  /**
+   * Whether `descendantId` is `ancestorId` itself or nested under it.
+   */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
+  async isInSubtree(ancestorId: string, descendantId: string): Promise<boolean> {
+    const row = await this.db
+      .selectFrom('album_closure')
+      .select('id_descendant')
+      .where('id_ancestor', '=', ancestorId)
+      .where('id_descendant', '=', descendantId)
+      .executeTakeFirst();
+    return !!row;
+  }
+
+  /**
+   * Re-parent an album, keeping the closure table consistent. Cycle-safe and transactional.
+   */
+  async move(id: string, newParentId: string | null): Promise<void> {
+    await this.db.transaction().execute(async (tx) => {
+      if (newParentId) {
+        const cycle = await tx
+          .selectFrom('album_closure')
+          .select('id_descendant')
+          .where('id_ancestor', '=', id)
+          .where('id_descendant', '=', newParentId)
+          .executeTakeFirst();
+        if (cycle) {
+          throw new Error('Cannot move an album into its own subtree');
+        }
+      }
+
+      const subtree = tx.selectFrom('album_closure as c').select('c.id_descendant').where('c.id_ancestor', '=', id);
+
+      // Remove the links between the album's old ancestors and its subtree.
+      await tx
+        .deleteFrom('album_closure')
+        .where('id_descendant', 'in', subtree)
+        .where('id_ancestor', 'not in', subtree)
+        .execute();
+
+      // Re-link the new parent's ancestors with the album's subtree.
+      if (newParentId) {
+        await tx
+          .insertInto('album_closure')
+          .columns(['id_ancestor', 'id_descendant'])
+          .expression((eb) =>
+            eb
+              .selectFrom('album_closure as anc')
+              .innerJoin('album_closure as sub', (join) => join.onTrue())
+              .select(['anc.id_ancestor', 'sub.id_descendant'])
+              .where('anc.id_descendant', '=', newParentId)
+              .where('sub.id_ancestor', '=', id),
+          )
+          .onConflict((oc) => oc.doNothing())
+          .execute();
+      }
+
+      await tx.updateTable('album').set({ parentAlbumId: newParentId }).where('id', '=', id).execute();
+    });
+  }
+
+  /**
+   * Direct children of an album that the user can access (owned, shared, or inherited).
+   */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
+  getChildren(userId: string, parentId: string): Promise<MapAlbumDto[]> {
+    return this.db
+      .selectFrom('album')
+      .selectAll('album')
+      .where('album.parentAlbumId', '=', parentId)
+      .where('album.deletedAt', 'is', null)
+      .where(hasAlbumAccess(userId, 'album.id'))
+      .select(withAlbumUsers(userId))
+      .select(withSharedLink)
+      .orderBy('album.createdAt', 'desc')
+      .execute();
   }
 
   @Chunked({ chunkSize: 30_000 })

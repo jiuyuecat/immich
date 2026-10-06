@@ -24,6 +24,8 @@ describe(StorageTemplateService.name, () => {
     ({ sut, mocks } = newTestService(StorageTemplateService));
 
     mocks.systemMetadata.get.mockResolvedValue({ storageTemplate: { enabled: true } });
+    // no album hierarchy by default; nested albums are covered by their own tests
+    mocks.album.getAlbumPaths.mockResolvedValue(new Map());
 
     sut.onConfigInit({ newConfig: defaults });
   });
@@ -232,6 +234,62 @@ describe(StorageTemplateService.name, () => {
         newPath: expect.stringContaining(
           `/data/library/${user.id}/${asset.fileCreatedAt.getFullYear()}/${album.albumName}/${asset.originalFileName}`,
         ),
+        oldPath: asset.originalPath,
+        pathType: AssetPathType.Original,
+      });
+    });
+
+    it('should use the full album hierarchy for the album variable', async () => {
+      const user = UserFactory.create();
+      const asset = AssetFactory.from().owner(user).exif().build();
+      const parent = AlbumFactory.from({ albumName: '二次元' }).build();
+      const child = AlbumFactory.from({ albumName: 'nacho', parentAlbumId: parent.id }).build();
+      const config = structuredClone(defaults);
+      config.storageTemplate.template = '{{album}}/{{filename}}';
+
+      sut.onConfigInit({ newConfig: config });
+
+      mocks.user.get.mockResolvedValue(user);
+      mocks.assetJob.getForStorageTemplateJob.mockResolvedValueOnce(getForStorageTemplate(asset));
+      mocks.album.getByAssetId.mockResolvedValueOnce([getForAlbum(child)]);
+      mocks.album.getAlbumPaths.mockResolvedValueOnce(new Map([[child.id, ['二次元', 'nacho']]]));
+
+      expect(await sut.handleMigrationSingle({ id: asset.id })).toBe(JobStatus.Success);
+
+      expect(mocks.move.create).toHaveBeenCalledWith({
+        entityId: asset.id,
+        newPath: `/data/library/${user.id}/二次元/nacho/${asset.originalFileName}`,
+        oldPath: asset.originalPath,
+        pathType: AssetPathType.Original,
+      });
+    });
+
+    it('should prefer the album nested the deepest when an asset is in multiple albums', async () => {
+      const user = UserFactory.create();
+      const asset = AssetFactory.from().owner(user).exif().build();
+      const parent = AlbumFactory.from({ albumName: '二次元' }).build();
+      const child = AlbumFactory.from({ albumName: 'nacho', parentAlbumId: parent.id }).build();
+      const config = structuredClone(defaults);
+      config.storageTemplate.template = '{{album}}/{{filename}}';
+
+      sut.onConfigInit({ newConfig: config });
+
+      mocks.user.get.mockResolvedValue(user);
+      mocks.assetJob.getForStorageTemplateJob.mockResolvedValueOnce(getForStorageTemplate(asset));
+      // `getByAssetId` returns the most recently created album first
+      mocks.album.getByAssetId.mockResolvedValueOnce([getForAlbum(parent), getForAlbum(child)]);
+      mocks.album.getAlbumPaths.mockResolvedValueOnce(
+        new Map([
+          [parent.id, ['二次元']],
+          [child.id, ['二次元', 'nacho']],
+        ]),
+      );
+
+      expect(await sut.handleMigrationSingle({ id: asset.id })).toBe(JobStatus.Success);
+
+      expect(mocks.move.create).toHaveBeenCalledWith({
+        entityId: asset.id,
+        newPath: `/data/library/${user.id}/二次元/nacho/${asset.originalFileName}`,
         oldPath: asset.originalPath,
         pathType: AssetPathType.Original,
       });

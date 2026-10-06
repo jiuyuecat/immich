@@ -27,7 +27,10 @@ select
   "album"."id"
 from
   "album"
-  inner join "album_user" as "albumUsers" on "albumUsers"."albumId" = "album"."id"
+  inner join "album_closure" as "ac" on "ac"."id_descendant" = "album"."id"
+  inner join "album" as "grantAlbum" on "grantAlbum"."id" = "ac"."id_ancestor"
+  and "grantAlbum"."deletedAt" is null
+  inner join "album_user" as "albumUsers" on "albumUsers"."albumId" = "ac"."id_ancestor"
   inner join "user" on "user"."id" = "albumUsers"."userId"
   and "user"."deletedAt" is null
 where
@@ -35,6 +38,10 @@ where
   and "album"."isActivityEnabled" = $2
   and "user"."id" = $3
   and "album"."deletedAt" is null
+  and (
+    "ac"."id_ancestor" = "album"."id"
+    or "albumUsers"."includeSubAlbums" = $4
+  )
 
 -- AccessRepository.album.checkOwnerAccess
 select
@@ -53,23 +60,63 @@ select
   "album"."id"
 from
   "album"
-  inner join "album_user" on "album_user"."albumId" = "album"."id"
-  inner join "user" on "user"."id" = "album_user"."userId"
-  and "user"."deletedAt" is null
 where
   "album"."id" in ($1)
   and "album"."deletedAt" is null
-  and "user"."id" = $2
-  and "album_user"."role" in ($3, $4)
+  and (
+    exists (
+      select
+      from
+        "album_user" as "direct"
+        inner join "user" on "user"."id" = "direct"."userId"
+        and "user"."deletedAt" is null
+      where
+        "direct"."albumId" = "album"."id"
+        and "direct"."userId" = $2
+        and "direct"."role" in ($3, $4)
+    )
+    or (
+      exists (
+        select
+        from
+          "album_closure" as "ac"
+          inner join "album_user" as "ancestorUser" on "ancestorUser"."albumId" = "ac"."id_ancestor"
+          inner join "user" on "user"."id" = "ancestorUser"."userId"
+          and "user"."deletedAt" is null
+          inner join "album" as "grantAlbum" on "grantAlbum"."id" = "ac"."id_ancestor"
+          and "grantAlbum"."deletedAt" is null
+        where
+          "ac"."id_descendant" = "album"."id"
+          and "ancestorUser"."userId" = $5
+          and "ancestorUser"."includeSubAlbums" = $6
+          and "ancestorUser"."role" in ($7, $8)
+      )
+      and not exists (
+        select
+        from
+          "album_user" as "anyDirectMember"
+        where
+          "anyDirectMember"."albumId" = "album"."id"
+          and "anyDirectMember"."userId" = $9
+      )
+    )
+  )
 
 -- AccessRepository.album.checkSharedLinkAccess
 select
-  "shared_link"."albumId"
+  "ac"."id_descendant" as "albumId"
 from
   "shared_link"
+  inner join "album_closure" as "ac" on "ac"."id_ancestor" = "shared_link"."albumId"
+  inner join "album" on "album"."id" = "ac"."id_descendant"
+  and "album"."deletedAt" is null
 where
   "shared_link"."id" = $1
-  and "shared_link"."albumId" in ($2)
+  and "ac"."id_descendant" in ($2)
+  and (
+    "ac"."id_ancestor" = "ac"."id_descendant"
+    or "shared_link"."includeSubAlbums" = $3
+  )
 
 -- AccessRepository.asset.checkAlbumAccess
 with
@@ -82,11 +129,14 @@ select
   "asset"."livePhotoVideoId"
 from
   "album"
+  inner join "album_closure" as "ac" on "ac"."id_descendant" = "album"."id"
+  inner join "album" as "grantAlbum" on "grantAlbum"."id" = "ac"."id_ancestor"
+  and "grantAlbum"."deletedAt" is null
   inner join "album_asset" as "albumAssets" on "album"."id" = "albumAssets"."albumId"
   inner join "asset" on "asset"."id" = "albumAssets"."assetId"
   and "asset"."deletedAt" is null
-  left join "album_user" as "albumUsers" on "albumUsers"."albumId" = "album"."id"
-  left join "user" on "user"."id" = "albumUsers"."userId"
+  inner join "album_user" as "albumUsers" on "albumUsers"."albumId" = "ac"."id_ancestor"
+  inner join "user" on "user"."id" = "albumUsers"."userId"
   and "user"."deletedAt" is null
   cross join "target"
 where
@@ -96,6 +146,10 @@ where
   )
   and "user"."id" = $2
   and "album"."deletedAt" is null
+  and (
+    "ac"."id_ancestor" = "album"."id"
+    or "albumUsers"."includeSubAlbums" = $3
+  )
 
 -- AccessRepository.asset.checkOwnerAccess
 select
@@ -132,7 +186,12 @@ select
   "albumAssets"."livePhotoVideoId" as "albumAssetLivePhotoVideoId"
 from
   "shared_link"
-  left join "album" on "album"."id" = "shared_link"."albumId"
+  left join "album_closure" as "ac" on "ac"."id_ancestor" = "shared_link"."albumId"
+  and (
+    "ac"."id_descendant" = "ac"."id_ancestor"
+    or "shared_link"."includeSubAlbums" = $1
+  )
+  left join "album" on "album"."id" = "ac"."id_descendant"
   and "album"."deletedAt" is null
   left join "shared_link_asset" on "shared_link_asset"."sharedLinkId" = "shared_link"."id"
   left join "asset" on "asset"."id" = "shared_link_asset"."assetId"
@@ -141,13 +200,13 @@ from
   left join "asset" as "albumAssets" on "albumAssets"."id" = "album_asset"."assetId"
   and "albumAssets"."deletedAt" is null
 where
-  "shared_link"."id" = $1
+  "shared_link"."id" = $2
   and array[
     "asset"."id",
     "asset"."livePhotoVideoId",
     "albumAssets"."id",
     "albumAssets"."livePhotoVideoId"
-  ] && array[$2]::uuid[]
+  ] && array[$3]::uuid[]
 
 -- AccessRepository.assetFile.checkOwnerAccess
 select

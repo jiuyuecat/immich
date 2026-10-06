@@ -17,6 +17,8 @@ describe('RecentAlbums component', () => {
     render(RecentAlbums);
 
     expect(sdkMock.getAllAlbums).toHaveBeenCalledOnce();
+    // only top-level albums are listed; sub-albums are reached through their parent
+    expect(sdkMock.getAllAlbums).toHaveBeenCalledWith({ rootOnly: true });
 
     // wtf
     await tick();

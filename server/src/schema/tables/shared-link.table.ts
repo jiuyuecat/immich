@@ -40,6 +40,9 @@ export class SharedLinkTable {
   @ForeignKeyColumn(() => AlbumTable, { nullable: true, onDelete: 'CASCADE', onUpdate: 'CASCADE' })
   albumId!: string | null;
 
+  @Column({ type: 'boolean', default: false })
+  includeSubAlbums!: Generated<boolean>;
+
   @Column({ type: 'boolean', default: true })
   allowDownload!: Generated<boolean>;
 

@@ -2206,6 +2206,26 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "parentId",
+            "required": false,
+            "in": "query",
+            "description": "Return the direct sub-albums of this album ID",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "rootOnly",
+            "required": false,
+            "in": "query",
+            "description": "Return only top-level albums (albums without an accessible parent album)",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -19795,6 +19815,13 @@
           "order": {
             "$ref": "#/components/schemas/AssetOrder"
           },
+          "parentAlbumId": {
+            "description": "Parent album ID, or null for a top-level album",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
           "shared": {
             "description": "Is shared album",
             "type": "boolean"
@@ -19820,6 +19847,7 @@
           "hasSharedLink",
           "id",
           "isActivityEnabled",
+          "parentAlbumId",
           "shared",
           "updatedAt"
         ],
@@ -19855,6 +19883,10 @@
       },
       "AlbumUserAddDto": {
         "properties": {
+          "includeSubAlbums": {
+            "description": "Also grant this user access to the album’s sub-albums (recursively)",
+            "type": "boolean"
+          },
           "role": {
             "$ref": "#/components/schemas/AlbumUserRole",
             "default": "editor",
@@ -19892,6 +19924,10 @@
       },
       "AlbumUserResponseDto": {
         "properties": {
+          "includeSubAlbums": {
+            "description": "Whether this user also has access to the album’s sub-albums",
+            "type": "boolean"
+          },
           "role": {
             "$ref": "#/components/schemas/AlbumUserRole"
           },
@@ -19900,6 +19936,7 @@
           }
         },
         "required": [
+          "includeSubAlbums",
           "role",
           "user"
         ],
@@ -21807,6 +21844,12 @@
                 "description": "Sending an empty string is deprecated; send null instead. Empty strings will no longer be coerced to null in v4."
               }
             ]
+          },
+          "parentAlbumId": {
+            "description": "Parent album ID to nest this album under",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
           }
         },
         "required": [
@@ -28293,6 +28336,10 @@
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
             "type": "string"
           },
+          "includeSubAlbums": {
+            "description": "Also grant access to the linked album’s sub-albums (recursively)",
+            "type": "boolean"
+          },
           "password": {
             "description": "Link password",
             "nullable": true,
@@ -28339,6 +28386,10 @@
             "nullable": true,
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
             "type": "string"
+          },
+          "includeSubAlbums": {
+            "description": "Also grant access to the linked album’s sub-albums (recursively)",
+            "type": "boolean"
           },
           "password": {
             "description": "Link password",
@@ -28416,6 +28467,10 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
             "type": "string"
           },
+          "includeSubAlbums": {
+            "description": "Whether the linked album’s sub-albums are also shared",
+            "type": "boolean"
+          },
           "key": {
             "description": "Encryption key (base64url)",
             "type": "string"
@@ -28452,6 +28507,7 @@
           "description",
           "expiresAt",
           "id",
+          "includeSubAlbums",
           "key",
           "password",
           "showMetadata",
@@ -32490,12 +32546,23 @@
           },
           "order": {
             "$ref": "#/components/schemas/AssetOrder"
+          },
+          "parentAlbumId": {
+            "description": "Parent album ID to move this album under, or null to move it to the top level",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
           }
         },
         "type": "object"
       },
       "UpdateAlbumUserDto": {
         "properties": {
+          "includeSubAlbums": {
+            "description": "Also grant this user access to the album’s sub-albums (recursively)",
+            "type": "boolean"
+          },
           "role": {
             "$ref": "#/components/schemas/AlbumUserRole"
           }

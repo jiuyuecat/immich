@@ -28,6 +28,7 @@ import {
   mdiExitToApp,
   mdiUpload,
   mdiCogOutline,
+  mdiFolderMove,
 } from '@mdi/js';
 import { type MessageFormatter } from 'svelte-i18n';
 import { goto } from '$app/navigation';
@@ -37,6 +38,7 @@ import type { TimelineAsset } from '$lib/managers/timeline-manager/types';
 import AddUsersModal from '$lib/modals/AddUsersModal.svelte';
 import AlbumEditModal from '$lib/modals/AlbumEditModal.svelte';
 import AlbumOptionsModal from '$lib/modals/AlbumOptionsModal.svelte';
+import MoveAlbumModal from '$lib/modals/MoveAlbumModal.svelte';
 import SharedLinkCreateModal from '$lib/modals/SharedLinkCreateModal.svelte';
 import { Route } from '$lib/route';
 import { userInteraction } from '$lib/stores/user.svelte';
@@ -112,6 +114,13 @@ export const getAlbumActions = ($t: MessageFormatter, album: AlbumResponseDto) =
     onAction: () => handleLeaveAlbum(album),
   };
 
+  const Move: ActionItem = {
+    title: $t('move_album'),
+    icon: mdiFolderMove,
+    $if: () => isOwned,
+    onAction: () => modalManager.show(MoveAlbumModal, { album }),
+  };
+
   const Options: ActionItem = {
     title: $t('options'),
     icon: mdiCogOutline,
@@ -126,7 +135,7 @@ export const getAlbumActions = ($t: MessageFormatter, album: AlbumResponseDto) =
     onAction: () => modalManager.show(AlbumOptionsModal, { album }),
   };
 
-  return { AddUsers, CreateSharedLink, Delete, Download, Edit, Leave, Options, Share };
+  return { AddUsers, CreateSharedLink, Delete, Download, Edit, Leave, Move, Options, Share };
 };
 
 export const getAlbumAssetActions = ($t: MessageFormatter, album: AlbumResponseDto, asset: AssetResponseDto) => {
@@ -238,26 +247,39 @@ export const handleUpdateUserAlbumRole = async ({
   albumId,
   userId,
   role,
+  includeSubAlbums,
 }: {
   albumId: string;
   userId: string;
   role: AlbumUserRole;
+  includeSubAlbums?: boolean;
 }) => {
   const $t = await getFormatter();
 
   try {
-    await updateAlbumUser({ id: albumId, userId, updateAlbumUserDto: { role } });
+    await updateAlbumUser({
+      id: albumId,
+      userId,
+      updateAlbumUserDto: { role, ...(includeSubAlbums === undefined ? {} : { includeSubAlbums }) },
+    });
     eventManager.emit('AlbumUserUpdate', { albumId, userId, role });
   } catch (error) {
     handleError(error, $t('errors.unable_to_change_album_user_role'));
   }
 };
 
-export const handleAddUsersToAlbum = async (album: AlbumResponseDto, users: UserResponseDto[]) => {
+export const handleAddUsersToAlbum = async (
+  album: AlbumResponseDto,
+  users: UserResponseDto[],
+  includeSubAlbums = false,
+) => {
   const $t = await getFormatter();
 
   try {
-    await addUsersToAlbum({ id: album.id, addUsersDto: { albumUsers: users.map(({ id }) => ({ userId: id })) } });
+    await addUsersToAlbum({
+      id: album.id,
+      addUsersDto: { albumUsers: users.map(({ id }) => ({ userId: id, includeSubAlbums })) },
+    });
     eventManager.emit('AlbumShare');
     return true;
   } catch (error) {

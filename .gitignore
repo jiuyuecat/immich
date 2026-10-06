@@ -28,3 +28,6 @@ vite.config.js.timestamp-*
 .devcontainer/.env*
 *.tsbuildinfo
 *.tsbuildInfo
+
+# local dev only: npm registry mirror used inside the dev containers
+/.npmrc

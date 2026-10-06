@@ -32,6 +32,7 @@ export type AuthUser = {
 export type AlbumUser = {
   user: ShallowDehydrateObject<User>;
   role: AlbumUserRole;
+  includeSubAlbums: boolean;
 };
 
 export type AssetFile = {
@@ -180,6 +181,7 @@ export type SharedLink = {
   albumId: string | null;
   allowDownload: boolean;
   allowUpload: boolean;
+  includeSubAlbums: boolean;
   assets: ShallowDehydrateObject<MapAsset>[];
   createdAt: Date;
   description: string | null;

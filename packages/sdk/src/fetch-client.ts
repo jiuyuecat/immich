@@ -847,6 +847,8 @@ export type AssetStatsResponseDto = {
     videos: number;
 };
 export type AlbumUserResponseDto = {
+    /** Whether this user also has access to the album’s sub-albums */
+    includeSubAlbums: boolean;
     role: AlbumUserRole;
     user: UserResponseDto;
 };
@@ -881,6 +883,8 @@ export type AlbumResponseDto = {
     /** Last modified asset timestamp */
     lastModifiedAssetTimestamp?: string;
     order?: AssetOrder;
+    /** Parent album ID, or null for a top-level album */
+    parentAlbumId: string | null;
     /** Is shared album */
     shared: boolean;
     /** UTC representation of (local) start date (earliest asset) */
@@ -902,6 +906,8 @@ export type CreateAlbumDto = {
     assetIds?: string[];
     /** Album description */
     description?: string | null;
+    /** Parent album ID to nest this album under */
+    parentAlbumId?: string;
 };
 export type AlbumsAddAssetsDto = {
     /** Album IDs */
@@ -932,6 +938,8 @@ export type UpdateAlbumDto = {
     /** Enable activity feed */
     isActivityEnabled?: boolean;
     order?: AssetOrder;
+    /** Parent album ID to move this album under, or null to move it to the top level */
+    parentAlbumId?: string | null;
 };
 export type BulkIdsDto = {
     /** IDs to process */
@@ -960,9 +968,13 @@ export type MapMarkerResponseDto = {
     state: string | null;
 };
 export type UpdateAlbumUserDto = {
+    /** Also grant this user access to the album’s sub-albums (recursively) */
+    includeSubAlbums?: boolean;
     role: AlbumUserRole;
 };
 export type AlbumUserAddDto = {
+    /** Also grant this user access to the album’s sub-albums (recursively) */
+    includeSubAlbums?: boolean;
     /** Album user role */
     role?: AlbumUserRole;
     /** User ID */
@@ -2979,6 +2991,8 @@ export type SharedLinkResponseDto = {
     expiresAt: string | null;
     /** Shared link ID */
     id: string;
+    /** Whether the linked album’s sub-albums are also shared */
+    includeSubAlbums: boolean;
     /** Encryption key (base64url) */
     key: string;
     /** Has password */
@@ -3004,6 +3018,8 @@ export type SharedLinkCreateDto = {
     description?: string | null;
     /** Expiration date */
     expiresAt?: string | null;
+    /** Also grant access to the linked album’s sub-albums (recursively) */
+    includeSubAlbums?: boolean;
     /** Link password */
     password?: string | null;
     /** Show metadata */
@@ -3025,6 +3041,8 @@ export type SharedLinkEditDto = {
     description?: string | null;
     /** Expiration date */
     expiresAt?: string | null;
+    /** Also grant access to the linked album’s sub-albums (recursively) */
+    includeSubAlbums?: boolean;
     /** Link password */
     password?: string | null;
     /** Show metadata */
@@ -4341,12 +4359,14 @@ export function getUserStatisticsAdmin({ id, isFavorite, isTrashed, visibility }
 /**
  * List all albums
  */
-export function getAllAlbums({ assetId, id, isOwned, isShared, name }: {
+export function getAllAlbums({ assetId, id, isOwned, isShared, name, parentId, rootOnly }: {
     assetId?: string;
     id?: string;
     isOwned?: boolean;
     isShared?: boolean;
     name?: string;
+    parentId?: string;
+    rootOnly?: boolean;
 }, opts?: Oazapfts.RequestOpts) {
     return oazapfts.ok(oazapfts.fetchJson<{
         status: 200;
@@ -4356,7 +4376,9 @@ export function getAllAlbums({ assetId, id, isOwned, isShared, name }: {
         id,
         isOwned,
         isShared,
-        name
+        name,
+        parentId,
+        rootOnly
     }))}`, {
         ...opts
     }));

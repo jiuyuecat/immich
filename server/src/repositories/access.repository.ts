@@ -59,12 +59,19 @@ class ActivityAccess {
     return this.db
       .selectFrom('album')
       .select('album.id')
-      .innerJoin('album_user as albumUsers', 'albumUsers.albumId', 'album.id')
+      .innerJoin('album_closure as ac', 'ac.id_descendant', 'album.id')
+      .innerJoin('album as grantAlbum', (join) =>
+        join.onRef('grantAlbum.id', '=', 'ac.id_ancestor').on('grantAlbum.deletedAt', 'is', null),
+      )
+      .innerJoin('album_user as albumUsers', 'albumUsers.albumId', 'ac.id_ancestor')
       .innerJoin('user', (join) => join.onRef('user.id', '=', 'albumUsers.userId').on('user.deletedAt', 'is', null))
       .where('album.id', 'in', [...albumIds])
       .where('album.isActivityEnabled', '=', true)
       .where((eb) => eb('user.id', '=', userId))
       .where('album.deletedAt', 'is', null)
+      .where((eb) =>
+        eb.or([eb('ac.id_ancestor', '=', eb.ref('album.id')), eb('albumUsers.includeSubAlbums', '=', true)]),
+      )
       .execute()
       .then((albums) => new Set(albums.map((album) => album.id)));
   }
@@ -97,7 +104,7 @@ class AlbumAccess {
 
   @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
   @ChunkedSet({ paramIndex: 1 })
-  async checkSharedAlbumAccess(userId: string, albumIds: Set<string>, access: AlbumUserRole) {
+  async checkSharedAlbumAccess(userId: string, albumIds: Set<string>, access: AlbumUserRole, inherit = true) {
     if (albumIds.size === 0) {
       return new Set<string>();
     }
@@ -108,12 +115,53 @@ class AlbumAccess {
     return this.db
       .selectFrom('album')
       .select('album.id')
-      .innerJoin('album_user', 'album_user.albumId', 'album.id')
-      .innerJoin('user', (join) => join.onRef('user.id', '=', 'album_user.userId').on('user.deletedAt', 'is', null))
       .where('album.id', 'in', [...albumIds])
       .where('album.deletedAt', 'is', null)
-      .where('user.id', '=', userId)
-      .where('album_user.role', 'in', [...accessRole])
+      .where((eb) =>
+        eb.or([
+          // direct membership on the album itself
+          eb.exists(
+            eb
+              .selectFrom('album_user as direct')
+              .innerJoin('user', (join) => join.onRef('user.id', '=', 'direct.userId').on('user.deletedAt', 'is', null))
+              .whereRef('direct.albumId', '=', 'album.id')
+              .where('direct.userId', '=', userId)
+              .where('direct.role', 'in', [...accessRole]),
+          ),
+          // inherited from an ancestor shared with `includeSubAlbums`, but only when the user has
+          // no direct membership on this album (explicit grants always take precedence, so an
+          // inherited editor role can never upgrade a directly-granted viewer)
+          ...(inherit
+            ? [
+                eb.and([
+                  eb.exists(
+                    eb
+                      .selectFrom('album_closure as ac')
+                      .innerJoin('album_user as ancestorUser', 'ancestorUser.albumId', 'ac.id_ancestor')
+                      .innerJoin('user', (join) =>
+                        join.onRef('user.id', '=', 'ancestorUser.userId').on('user.deletedAt', 'is', null),
+                      )
+                      .innerJoin('album as grantAlbum', (join) =>
+                        join.onRef('grantAlbum.id', '=', 'ac.id_ancestor').on('grantAlbum.deletedAt', 'is', null),
+                      )
+                      .whereRef('ac.id_descendant', '=', 'album.id')
+                      .where('ancestorUser.userId', '=', userId)
+                      .where('ancestorUser.includeSubAlbums', '=', true)
+                      .where('ancestorUser.role', 'in', [...accessRole]),
+                  ),
+                  eb.not(
+                    eb.exists(
+                      eb
+                        .selectFrom('album_user as anyDirectMember')
+                        .whereRef('anyDirectMember.albumId', '=', 'album.id')
+                        .where('anyDirectMember.userId', '=', userId),
+                    ),
+                  ),
+                ]),
+              ]
+            : []),
+        ]),
+      )
       .execute()
       .then((albums) => new Set(albums.map((album) => album.id)));
   }
@@ -127,16 +175,16 @@ class AlbumAccess {
 
     return this.db
       .selectFrom('shared_link')
-      .select('shared_link.albumId')
+      .innerJoin('album_closure as ac', 'ac.id_ancestor', 'shared_link.albumId')
+      .innerJoin('album', (join) => join.onRef('album.id', '=', 'ac.id_descendant').on('album.deletedAt', 'is', null))
       .where('shared_link.id', '=', sharedLinkId)
-      .where('shared_link.albumId', 'in', [...albumIds])
+      .where('ac.id_descendant', 'in', [...albumIds])
+      .where((eb) =>
+        eb.or([eb('ac.id_ancestor', '=', eb.ref('ac.id_descendant')), eb('shared_link.includeSubAlbums', '=', true)]),
+      )
+      .select('ac.id_descendant as albumId')
       .execute()
-      .then(
-        (sharedLinks) =>
-          new Set(
-            sharedLinks.filter((sharedLink) => sharedLink.albumId).map((sharedLink) => sharedLink.albumId),
-          ) as Set<string>,
-      );
+      .then((rows) => new Set(rows.map((row) => row.albumId)));
   }
 }
 
@@ -153,12 +201,16 @@ class AssetAccess {
     return this.db
       .with('target', (qb) => qb.selectNoFrom(sql`array[${sql.join([...assetIds])}]::uuid[]`.as('ids')))
       .selectFrom('album')
+      .innerJoin('album_closure as ac', 'ac.id_descendant', 'album.id')
+      .innerJoin('album as grantAlbum', (join) =>
+        join.onRef('grantAlbum.id', '=', 'ac.id_ancestor').on('grantAlbum.deletedAt', 'is', null),
+      )
       .innerJoin('album_asset as albumAssets', 'album.id', 'albumAssets.albumId')
       .innerJoin('asset', (join) =>
         join.onRef('asset.id', '=', 'albumAssets.assetId').on('asset.deletedAt', 'is', null),
       )
-      .leftJoin('album_user as albumUsers', 'albumUsers.albumId', 'album.id')
-      .leftJoin('user', (join) => join.onRef('user.id', '=', 'albumUsers.userId').on('user.deletedAt', 'is', null))
+      .innerJoin('album_user as albumUsers', 'albumUsers.albumId', 'ac.id_ancestor')
+      .innerJoin('user', (join) => join.onRef('user.id', '=', 'albumUsers.userId').on('user.deletedAt', 'is', null))
       .crossJoin('target')
       .select(['asset.id', 'asset.livePhotoVideoId'])
       .where((eb) =>
@@ -169,6 +221,9 @@ class AssetAccess {
       )
       .where('user.id', '=', userId)
       .where('album.deletedAt', 'is', null)
+      .where((eb) =>
+        eb.or([eb('ac.id_ancestor', '=', eb.ref('album.id')), eb('albumUsers.includeSubAlbums', '=', true)]),
+      )
       .execute()
       .then((assets) => {
         const allowedIds = new Set<string>();
@@ -237,7 +292,17 @@ class AssetAccess {
 
     return this.db
       .selectFrom('shared_link')
-      .leftJoin('album', (join) => join.onRef('album.id', '=', 'shared_link.albumId').on('album.deletedAt', 'is', null))
+      .leftJoin('album_closure as ac', (join) =>
+        join
+          .onRef('ac.id_ancestor', '=', 'shared_link.albumId')
+          .on((eb) =>
+            eb.or([
+              eb('ac.id_descendant', '=', eb.ref('ac.id_ancestor')),
+              eb('shared_link.includeSubAlbums', '=', true),
+            ]),
+          ),
+      )
+      .leftJoin('album', (join) => join.onRef('album.id', '=', 'ac.id_descendant').on('album.deletedAt', 'is', null))
       .leftJoin('shared_link_asset', 'shared_link_asset.sharedLinkId', 'shared_link.id')
       .leftJoin('asset', (join) =>
         join.onRef('asset.id', '=', 'shared_link_asset.assetId').on('asset.deletedAt', 'is', null),

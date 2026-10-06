@@ -5,7 +5,8 @@ import type { PageLoad } from './$types';
 
 export const load = (async ({ url }) => {
   await authenticate(url);
-  const sharedAlbums = await getAllAlbums({ isShared: true });
+  // only top-level albums; sub-albums are reached through their parent
+  const sharedAlbums = await getAllAlbums({ isShared: true, rootOnly: true });
   const partners = await getPartners({ direction: PartnerDirection.SharedWith });
   const $t = await getFormatter();
 

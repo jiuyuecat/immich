@@ -11,6 +11,8 @@
     allowUpload: boolean;
     showMetadata: boolean;
     expiresAt: string | null;
+    includeSubAlbums?: boolean;
+    showIncludeSubAlbums?: boolean;
   };
 
   let {
@@ -21,6 +23,8 @@
     allowUpload = $bindable(),
     showMetadata = $bindable(),
     expiresAt = $bindable(),
+    includeSubAlbums = $bindable(false),
+    showIncludeSubAlbums = false,
   }: Props = $props();
 
   $effect(() => {
@@ -63,4 +67,10 @@
   <Field label={$t('allow_public_user_to_upload')}>
     <Switch bind:checked={allowUpload} />
   </Field>
+
+  {#if showIncludeSubAlbums}
+    <Field label={$t('include_sub_albums')} description={$t('include_sub_albums_description')}>
+      <Switch bind:checked={includeSubAlbums} />
+    </Field>
+  {/if}
 </div>
