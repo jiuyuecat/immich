@@ -9,9 +9,7 @@ import 'package:immich_mobile/domain/models/album/album.model.dart';
 List<RemoteAlbum> rootAlbums(List<RemoteAlbum> albums) {
   final visibleIds = albums.map((album) => album.id).toSet();
 
-  return albums
-      .where((album) => album.parentAlbumId == null || !visibleIds.contains(album.parentAlbumId))
-      .toList();
+  return albums.where((album) => album.parentAlbumId == null || !visibleIds.contains(album.parentAlbumId)).toList();
 }
 
 /// Direct sub-albums of [albumId].
@@ -38,7 +36,8 @@ List<RemoteAlbum> albumAncestors(List<RemoteAlbum> albums, RemoteAlbum album) {
 ///
 /// Used to exclude a subtree from the candidates when moving an album, since
 /// moving an album into its own descendant would create a cycle.
-Set<String> albumSubtreeIds(List<RemoteAlbum> albums, String albumId) {  final childrenByParent = <String, List<RemoteAlbum>>{};
+Set<String> albumSubtreeIds(List<RemoteAlbum> albums, String albumId) {
+  final childrenByParent = <String, List<RemoteAlbum>>{};
   for (final album in albums) {
     final parentId = album.parentAlbumId;
     if (parentId != null) {
@@ -65,3 +64,11 @@ String albumPathLabel(List<RemoteAlbum> albums, RemoteAlbum album) {
 
   return [...ancestors.reversed, album].map((a) => a.name).join(' / ');
 }
+
+/// Whether the server applied the requested parent album.
+///
+/// An Immich build without nested-album support drops the unknown
+/// `parentAlbumId` field from the request (Zod strips it) and still answers
+/// 200, so the returned album — not the status code — is the only signal that
+/// the hierarchy was actually stored.
+bool serverHonouredParent(RemoteAlbum album, String? requestedParentId) => album.parentAlbumId == requestedParentId;

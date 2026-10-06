@@ -157,19 +157,34 @@ class AlbumOptionsPage extends HookConsumerWidget {
       }
 
       try {
-        await ref.read(remoteAlbumProvider.notifier).moveAlbum(album.id, parentAlbumId: target.parentAlbumId);
-        parentAlbumId.value = target.parentAlbumId;
-        if (!context.mounted) {
+        final moved = await ref
+            .read(remoteAlbumProvider.notifier)
+            .moveAlbum(album.id, parentAlbumId: target.parentAlbumId);
+        if (!context.mounted || moved == null) {
           return;
         }
 
+        if (!serverHonouredParent(moved, target.parentAlbumId)) {
+          ImmichToast.show(
+            context: context,
+            msg: context.t.server_does_not_support_sub_albums,
+            toastType: ToastType.error,
+          );
+          return;
+        }
+
+        parentAlbumId.value = target.parentAlbumId;
         ImmichToast.show(context: context, msg: context.t.album_info_updated, toastType: ToastType.success);
       } catch (_) {
         if (!context.mounted) {
           return;
         }
 
-        ImmichToast.show(context: context, msg: context.t.errors.unable_to_update_album_info, toastType: ToastType.error);
+        ImmichToast.show(
+          context: context,
+          msg: context.t.errors.unable_to_update_album_info,
+          toastType: ToastType.error,
+        );
       }
     }
 

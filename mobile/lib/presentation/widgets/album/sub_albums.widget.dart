@@ -42,8 +42,7 @@ class AlbumBreadcrumb extends ConsumerWidget {
           spacing: 2,
           children: [
             for (var i = 0; i < path.length; i++) ...[
-              if (i > 0)
-                Icon(Icons.chevron_right_rounded, size: 16, color: context.colorScheme.onSurfaceSecondary),
+              if (i > 0) Icon(Icons.chevron_right_rounded, size: 16, color: context.colorScheme.onSurfaceSecondary),
               if (i == path.length - 1)
                 Text(path[i].name, style: currentStyle, maxLines: 1, overflow: TextOverflow.ellipsis)
               else
@@ -77,8 +76,7 @@ class SubAlbumsSliver extends ConsumerWidget {
   Future<void> _createSubAlbum(BuildContext context, WidgetRef ref) async {
     final name = await showDialog<String?>(
       context: context,
-      builder: (context) =>
-          NewAlbumNameModal(title: context.t.create_sub_album, confirmLabel: context.t.create),
+      builder: (context) => NewAlbumNameModal(title: context.t.create_sub_album, confirmLabel: context.t.create),
     );
 
     if (name == null || name.isEmpty || !context.mounted) {
@@ -86,10 +84,13 @@ class SubAlbumsSliver extends ConsumerWidget {
     }
 
     try {
-      final created = await ref
-          .read(remoteAlbumProvider.notifier)
-          .createAlbum(title: name, parentAlbumId: album.id);
+      final created = await ref.read(remoteAlbumProvider.notifier).createAlbum(title: name, parentAlbumId: album.id);
       if (created == null || !context.mounted) {
+        return;
+      }
+
+      if (!serverHonouredParent(created, album.id)) {
+        ImmichToast.show(context: context, toastType: ToastType.error, msg: context.t.album_created_at_top_level);
         return;
       }
 
@@ -203,7 +204,11 @@ class _NewSubAlbumCard extends StatelessWidget {
                     borderRadius: const BorderRadius.all(Radius.circular(16)),
                     border: Border.all(color: context.colorScheme.outline.withAlpha(60)),
                   ),
-                  child: Icon(Icons.create_new_folder_outlined, size: 28, color: context.colorScheme.onSurfaceSecondary),
+                  child: Icon(
+                    Icons.create_new_folder_outlined,
+                    size: 28,
+                    color: context.colorScheme.onSurfaceSecondary,
+                  ),
                 ),
               ),
               const SizedBox(height: 6),
