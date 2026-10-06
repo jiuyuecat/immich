@@ -1,3 +1,16 @@
+> [!IMPORTANT]
+> **Immich 的嵌套相册分支 / Unofficial fork of Immich with nested albums**
+>
+> 这是个人分支，在 Immich 上加了「相册套相册」的能力。**基于 `main` 分支（v3.3.0-rc.0 之后），不是稳定版本**，与 Immich 官方及其团队无隶属关系。
+>
+> - **新增功能**：子相册 + 面包屑导航、「包含子相册」的共享继承、「移动到…」、`{{album}}` 存储模板展开为完整层级。后端 / Web / Android App 均已实现。
+> - **成品下载**（Android APK + 服务端 Docker 镜像）：https://github.com/jiuyuecat/immich/releases
+> - **改动所在分支**：[`feat/nested-albums`](https://github.com/jiuyuecat/immich/tree/feat/nested-albums)
+> - **官方为什么没有这个功能**：[discussion #19823](https://github.com/immich-app/immich/discussions/19823)
+>
+> 以下为 Immich 官方 README 原文。
+
+---
 <p align="center"> 
   <br/>
   <a href="https://opensource.org/license/agpl-v3"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?color=3F51B5&style=for-the-badge&label=License&logoColor=000000&labelColor=ececec" alt="License: AGPLv3"></a>
