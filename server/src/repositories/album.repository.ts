@@ -6,6 +6,7 @@ import {
   type NotNull,
   type Selectable,
   type ShallowDehydrateObject,
+  type SqlBool,
   type Updateable,
   sql,
 } from 'kysely';
@@ -696,7 +697,7 @@ export class AlbumRepository {
       .where((eb) =>
         eb.and([
           eb.not(eb.exists(this.updateThumbnailBuilder(eb).select(sql`1`.as('1')))), // No own assets
-          sql`"album"."albumThumbnailAssetId" IS DISTINCT FROM (${subtreeThumbnail(eb)})`,
+          sql<SqlBool>`"album"."albumThumbnailAssetId" IS DISTINCT FROM (${subtreeThumbnail(eb)})`,
         ]),
       )
       .execute();
