@@ -16,5 +16,11 @@
     <span>{getAlbumDateRange(startDate, album.endDate ?? startDate)}</span>
     <span>•</span>
   {/if}
-  <span>{$t('items_count', { values: { count: album.assetCount } })}</span>
+  <span>
+    {#if album.subAlbumCount > 0}
+      {$t('sub_albums_and_items', { values: { subAlbums: album.subAlbumCount, count: album.assetCountTotal } })}
+    {:else}
+      {$t('items_count', { values: { count: album.assetCount } })}
+    {/if}
+  </span>
 </span>

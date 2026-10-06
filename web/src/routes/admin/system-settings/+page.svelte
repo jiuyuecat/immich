@@ -16,6 +16,7 @@
   import StorageTemplateSettings from '$lib/components/admin-settings/StorageTemplateSettings.svelte';
   import ThemeSettings from './ThemeSettings.svelte';
   import TrashSettings from './TrashSettings.svelte';
+  import UploadSettings from './UploadSettings.svelte';
   import UserSettings from './UserSettings.svelte';
   import AdminPageLayout from '$lib/components/layouts/AdminPageLayout.svelte';
   import SettingAccordion from '$lib/components/shared-components/settings/SettingAccordion.svelte';
@@ -43,6 +44,7 @@
     mdiSync,
     mdiTrashCanOutline,
     mdiUpdate,
+    mdiUpload,
     mdiVideoOutline,
   } from '@mdi/js';
   import type { Component } from 'svelte';
@@ -174,6 +176,13 @@
       subtitle: $t('admin.trash_settings_description'),
       key: 'trash',
       icon: mdiTrashCanOutline,
+    },
+    {
+      component: UploadSettings,
+      title: $t('admin.upload_settings'),
+      subtitle: $t('admin.upload_settings_description'),
+      key: 'upload',
+      icon: mdiUpload,
     },
     {
       component: UserSettings,

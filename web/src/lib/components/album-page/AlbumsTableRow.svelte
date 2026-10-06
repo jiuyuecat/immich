@@ -62,7 +62,11 @@
     {/if}
   </td>
   <td class="text-md text-center text-ellipsis sm:w-2/12 md:w-2/12 xl:w-[15%] 2xl:w-[12%]">
-    {$t('items_count', { values: { count: album.assetCount } })}
+    {#if album.subAlbumCount > 0}
+      {$t('sub_albums_and_items', { values: { subAlbums: album.subAlbumCount, count: album.assetCountTotal } })}
+    {:else}
+      {$t('items_count', { values: { count: album.assetCount } })}
+    {/if}
   </td>
   <td class="text-md hidden w-3/12 text-center text-ellipsis sm:block xl:w-[15%] 2xl:w-[12%]">
     {dateLocaleString(album.updatedAt)}

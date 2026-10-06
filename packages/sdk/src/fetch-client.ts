@@ -402,6 +402,10 @@ export type AdminConfigTrashDto = {
     /** Enabled */
     enabled: boolean;
 };
+export type AdminConfigUploadDto = {
+    /** Allow uploading assets that already exist */
+    allowDuplicates: boolean;
+};
 export type AdminConfigUserDto = {
     /** Delete delay */
     deleteDelay: number;
@@ -428,6 +432,7 @@ export type AdminConfigDto = {
     templates: AdminConfigTemplatesDto;
     theme: AdminConfigThemeDto;
     trash: AdminConfigTrashDto;
+    upload: AdminConfigUploadDto;
     user: AdminConfigUserDto;
 };
 export type DatabaseBackupDeleteDto = {
@@ -867,6 +872,8 @@ export type AlbumResponseDto = {
     albumUsers: AlbumUserResponseDto[];
     /** Number of assets */
     assetCount: number;
+    /** Total number of assets in the album and all of its sub-albums */
+    assetCountTotal: number;
     contributorCounts?: ContributorCountResponseDto[];
     /** Creation date */
     createdAt: string;
@@ -889,6 +896,8 @@ export type AlbumResponseDto = {
     shared: boolean;
     /** UTC representation of (local) start date (earliest asset) */
     startDate?: string;
+    /** Number of direct sub-albums */
+    subAlbumCount: number;
     /** Last update date */
     updatedAt: string;
 };

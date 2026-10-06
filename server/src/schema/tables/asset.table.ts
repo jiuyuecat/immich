@@ -28,12 +28,12 @@ import { ASSET_CHECKSUM_CONSTRAINT } from 'src/utils/database.js';
   referencingOldTableAs: 'old',
   when: 'pg_trigger_depth() = 0',
 })
-// Checksums must be unique per user and library
+// Checksums must be unique per user and library, unless the upload was explicitly marked as an allowed duplicate
 @Index({
   name: ASSET_CHECKSUM_CONSTRAINT,
   columns: ['ownerId', 'checksum'],
   unique: true,
-  where: '"libraryId" IS NULL',
+  where: '"libraryId" IS NULL AND "duplicateAllowed" = false',
 })
 @Index({
   columns: ['ownerId', 'libraryId', 'checksum'],
@@ -91,6 +91,11 @@ export class AssetTable {
 
   @Column({ enum: asset_checksum_algorithm_enum })
   checksumAlgorithm!: ChecksumAlgorithm;
+
+  // When true, this asset is excluded from the per-owner checksum uniqueness index,
+  // allowing the same file to be uploaded more than once. Set from the server config.
+  @Column({ type: 'boolean', default: false })
+  duplicateAllowed!: Generated<boolean>;
 
   @ForeignKeyColumn(() => AssetTable, { nullable: true, onUpdate: 'CASCADE', onDelete: 'SET NULL' })
   livePhotoVideoId!: string | null;

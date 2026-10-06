@@ -372,6 +372,11 @@ const AdminConfigSchemaWithVisibility = z
         days: z.int().min(0).describe('Days').meta({ visibility: User }),
       })
       .meta({ id: 'AdminConfigTrashDto' }),
+    upload: z
+      .object({
+        allowDuplicates: configBool.describe('Allow uploading assets that already exist'),
+      })
+      .meta({ id: 'AdminConfigUploadDto' }),
     theme: z
       .object({ customCss: z.string().describe('Custom CSS for theming').meta({ visibility: Public }) })
       .meta({ id: 'AdminConfigThemeDto' }),
@@ -729,6 +734,9 @@ export const defaults = Object.freeze<SystemConfig>({
   trash: {
     enabled: true,
     days: 30,
+  },
+  upload: {
+    allowDuplicates: false,
   },
   theme: {
     customCss: '',

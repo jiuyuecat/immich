@@ -17,7 +17,7 @@ import { BulkIdErrorReason, BulkIdResponseDto, BulkIdsDto } from 'src/dtos/asset
 import { AuthDto } from 'src/dtos/auth.dto.js';
 import { MapMarkerResponseDto } from 'src/dtos/map.dto.js';
 import { AlbumUserRole, Permission } from 'src/enum.js';
-import { AlbumAssetCount, AlbumInfoOptions } from 'src/repositories/album.repository.js';
+import { AlbumAssetCount, AlbumInfoOptions, AlbumSubtreeCount } from 'src/repositories/album.repository.js';
 import { AlbumUserTable } from 'src/schema/tables/album-user.table.js';
 import { BaseService } from 'src/services/base.service.js';
 import { addAssets, removeAssets } from 'src/utils/asset.util.js';
@@ -61,10 +61,18 @@ export class AlbumService extends BaseService {
 
     // Get asset count for each album. Then map the result to an object:
     // { [albumId]: assetCount }
-    const results = await this.albumRepository.getMetadataForIds(albums.map((album) => album.id));
+    const albumIds = albums.map((album) => album.id);
+    const [results, subtreeResults] = await Promise.all([
+      this.albumRepository.getMetadataForIds(albumIds),
+      this.albumRepository.getSubtreeCounts(ownerId, albumIds),
+    ]);
     const albumMetadata: Record<string, AlbumAssetCount> = {};
     for (const metadata of results) {
       albumMetadata[metadata.albumId] = metadata;
+    }
+    const albumSubtree: Record<string, AlbumSubtreeCount> = {};
+    for (const counts of subtreeResults) {
+      albumSubtree[counts.albumId] = counts;
     }
 
     return albums.map((album) => ({
@@ -73,6 +81,8 @@ export class AlbumService extends BaseService {
       startDate: asDateTimeString(albumMetadata[album.id]?.startDate ?? undefined),
       endDate: asDateTimeString(albumMetadata[album.id]?.endDate ?? undefined),
       assetCount: albumMetadata[album.id]?.assetCount ?? 0,
+      subAlbumCount: albumSubtree[album.id]?.subAlbumCount ?? 0,
+      assetCountTotal: albumSubtree[album.id]?.assetCountTotal ?? (albumMetadata[album.id]?.assetCount ?? 0),
       // lastModifiedAssetTimestamp is only used in mobile app, please remove if not need
       lastModifiedAssetTimestamp: asDateTimeString(albumMetadata[album.id]?.lastModifiedAssetTimestamp ?? undefined),
     }));
@@ -82,7 +92,10 @@ export class AlbumService extends BaseService {
     await this.requireAccess({ auth, permission: Permission.AlbumRead, ids: [id] });
     await this.albumRepository.updateThumbnails();
     const album = await this.findOrFail(id, auth.user.id, { withAssets: false });
-    const [albumMetadataForIds] = await this.albumRepository.getMetadataForIds([album.id]);
+    const [[albumMetadataForIds], [albumSubtreeForId]] = await Promise.all([
+      this.albumRepository.getMetadataForIds([album.id]),
+      this.albumRepository.getSubtreeCounts(auth.user.id, [album.id]),
+    ]);
 
     const hasSharedUsers = album.albumUsers && album.albumUsers.length > 1;
     const hasSharedLink = album.sharedLinks && album.sharedLinks.length > 0;
@@ -93,6 +106,8 @@ export class AlbumService extends BaseService {
       startDate: asDateTimeString(albumMetadataForIds?.startDate ?? undefined),
       endDate: asDateTimeString(albumMetadataForIds?.endDate ?? undefined),
       assetCount: albumMetadataForIds?.assetCount ?? 0,
+      subAlbumCount: albumSubtreeForId?.subAlbumCount ?? 0,
+      assetCountTotal: albumSubtreeForId?.assetCountTotal ?? (albumMetadataForIds?.assetCount ?? 0),
       lastModifiedAssetTimestamp: asDateTimeString(albumMetadataForIds?.lastModifiedAssetTimestamp ?? undefined),
       contributorCounts: isShared ? await this.albumRepository.getContributorCounts(album.id) : undefined,
     };
@@ -106,6 +121,16 @@ export class AlbumService extends BaseService {
     }
 
     return this.mapRepository.getAlbumMapMarkers(id);
+  }
+
+  /** Fills in the subtree counts that `mapAlbum` cannot know about on its own. */
+  private async withSubtreeCounts(userId: string, album: AlbumResponseDto): Promise<AlbumResponseDto> {
+    const [counts] = await this.albumRepository.getSubtreeCounts(userId, [album.id]);
+    return {
+      ...album,
+      subAlbumCount: counts?.subAlbumCount ?? 0,
+      assetCountTotal: counts?.assetCountTotal ?? album.assetCount,
+    };
   }
 
   async create(auth: AuthDto, dto: CreateAlbumDto): Promise<AlbumResponseDto> {
@@ -183,7 +208,7 @@ export class AlbumService extends BaseService {
       auth.user.id,
     );
 
-    return mapAlbum({ ...updatedAlbum, assets: album.assets });
+    return this.withSubtreeCounts(auth.user.id, mapAlbum({ ...updatedAlbum, assets: album.assets }));
   }
 
   async delete(auth: AuthDto, id: string): Promise<void> {
@@ -364,7 +389,7 @@ export class AlbumService extends BaseService {
       await this.eventRepository.emit('AlbumInvite', { id, userId, senderName: auth.user.name });
     }
 
-    return mapAlbum(await this.findOrFail(id, auth.user.id, { withAssets: true }));
+    return this.withSubtreeCounts(auth.user.id, mapAlbum(await this.findOrFail(id, auth.user.id, { withAssets: true })));
   }
 
   async removeUser(auth: AuthDto, id: string, userId: string | 'me'): Promise<void> {

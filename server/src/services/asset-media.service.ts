@@ -48,6 +48,11 @@ export class AssetMediaService extends BaseService {
       return;
     }
 
+    const { upload } = await this.getConfig({ withCache: true });
+    if (upload.allowDuplicates) {
+      return;
+    }
+
     const assetId = await this.assetRepository.getUploadAssetIdByChecksum(auth.user.id, fromChecksum(checksum));
     if (!assetId) {
       return;
@@ -146,12 +151,15 @@ export class AssetMediaService extends BaseService {
         );
       }
 
+      const { upload } = await this.getConfig({ withCache: true });
+
       asset = await this.assetRepository.create({
         ownerId: auth.user.id,
         libraryId: null,
 
         checksum: file.checksum,
         checksumAlgorithm: ChecksumAlgorithm.sha1File,
+        duplicateAllowed: upload.allowDuplicates,
         originalPath: file.originalPath,
 
         fileCreatedAt: dto.fileCreatedAt,
@@ -316,6 +324,11 @@ export class AssetMediaService extends BaseService {
   }
 
   async bulkUploadCheck(auth: AuthDto, dto: AssetBulkUploadCheckDto): Promise<AssetBulkUploadCheckResponseDto> {
+    const { upload } = await this.getConfig({ withCache: true });
+    if (upload.allowDuplicates) {
+      return { results: dto.assets.map(({ id }) => ({ id, action: AssetUploadAction.ACCEPT })) };
+    }
+
     const checksums: Buffer[] = dto.assets.map((asset) => fromChecksum(asset.checksum));
     const results = await this.assetRepository.getByChecksums(auth.user.id, checksums);
     const checksumMap: Record<string, { id: string; isTrashed: boolean }> = {};

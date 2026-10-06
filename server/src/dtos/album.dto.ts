@@ -185,6 +185,8 @@ export const AlbumResponseSchema = z
       ),
     hasSharedLink: z.boolean().describe('Has shared link'),
     assetCount: z.int().min(0).describe('Number of assets'),
+    subAlbumCount: z.int().min(0).describe('Number of direct sub-albums the user can access'),
+    assetCountTotal: z.int().min(0).describe('Total number of assets in the album and all of its sub-albums'),
     // TODO: use `isoDatetimeToDate` when using `ZodSerializerDto` on the controllers.
     lastModifiedAssetTimestamp: z
       .string()
@@ -290,6 +292,10 @@ export const mapAlbum = (entity: MaybeDehydrated<MapAlbumDto>): AlbumResponseDto
     startDate: asDateTimeString(startDate),
     endDate: asDateTimeString(endDate),
     assetCount: entity.assets?.length || 0,
+    // Placeholders; the service overwrites these with subtree-aware values when
+    // it has the data to do so (the album list and detail endpoints).
+    subAlbumCount: 0,
+    assetCountTotal: entity.assets?.length || 0,
     isActivityEnabled: entity.isActivityEnabled,
     order: entity.order,
     parentAlbumId: entity.parentAlbumId,

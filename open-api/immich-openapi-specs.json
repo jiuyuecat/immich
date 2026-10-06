@@ -18631,6 +18631,9 @@
           "trash": {
             "$ref": "#/components/schemas/AdminConfigTrashDto"
           },
+          "upload": {
+            "$ref": "#/components/schemas/AdminConfigUploadDto"
+          },
           "user": {
             "$ref": "#/components/schemas/AdminConfigUserDto"
           }
@@ -18657,6 +18660,7 @@
           "templates",
           "theme",
           "trash",
+          "upload",
           "user"
         ],
         "type": "object"
@@ -19709,6 +19713,18 @@
         ],
         "type": "object"
       },
+      "AdminConfigUploadDto": {
+        "properties": {
+          "allowDuplicates": {
+            "description": "Allow uploading assets that already exist",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "allowDuplicates"
+        ],
+        "type": "object"
+      },
       "AdminConfigUserDto": {
         "properties": {
           "deleteDelay": {
@@ -19758,6 +19774,12 @@
           },
           "assetCount": {
             "description": "Number of assets",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "assetCountTotal": {
+            "description": "Total number of assets in the album and all of its sub-albums",
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
@@ -19831,6 +19853,12 @@
             "format": "date-time",
             "type": "string"
           },
+          "subAlbumCount": {
+            "description": "Number of direct sub-albums",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
           "updatedAt": {
             "description": "Last update date",
             "format": "date-time",
@@ -19842,6 +19870,7 @@
           "albumThumbnailAssetId",
           "albumUsers",
           "assetCount",
+          "assetCountTotal",
           "createdAt",
           "description",
           "hasSharedLink",
@@ -19849,6 +19878,7 @@
           "isActivityEnabled",
           "parentAlbumId",
           "shared",
+          "subAlbumCount",
           "updatedAt"
         ],
         "type": "object"

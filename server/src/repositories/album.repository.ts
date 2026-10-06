@@ -14,7 +14,7 @@ import { InjectKysely } from 'nestjs-kysely';
 import { columns } from 'src/database.js';
 import { Chunked, ChunkedArray, ChunkedSet, DummyValue, GenerateSql } from 'src/decorators.js';
 import { AlbumUserCreateDto, MapAlbumDto } from 'src/dtos/album.dto.js';
-import { AlbumUserRole } from 'src/enum.js';
+import { AlbumUserRole, AssetVisibility } from 'src/enum.js';
 import { DB } from 'src/schema/index.js';
 import { AlbumTable } from 'src/schema/tables/album.table.js';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table.js';
@@ -26,6 +26,12 @@ export interface AlbumAssetCount {
   startDate: Date | null;
   endDate: Date | null;
   lastModifiedAssetTimestamp: Date | null;
+}
+
+export interface AlbumSubtreeCount {
+  albumId: string;
+  subAlbumCount: number;
+  assetCountTotal: number;
 }
 
 export interface AlbumInfoOptions {
@@ -259,6 +265,64 @@ export class AlbumRepository {
         .groupBy('album_asset.albumId')
         .execute()
     );
+  }
+
+  /**
+   * Per-album subtree stats for the album list: the number of direct sub-albums
+   * and the total number of assets across the whole subtree (the album itself
+   * plus every descendant), limited to what the user can access.
+   */
+  async getSubtreeCounts(ownerId: string, albumIds: string[]): Promise<AlbumSubtreeCount[]> {
+    if (albumIds.length === 0) {
+      return [];
+    }
+
+    const [subAlbums, assets] = await Promise.all([
+      this.db
+        .selectFrom('album')
+        .select('album.parentAlbumId as albumId')
+        .select((eb) => sql<number>`${eb.fn.count('album.id')}::int`.as('subAlbumCount'))
+        .where('album.parentAlbumId', 'in', albumIds)
+        .where('album.deletedAt', 'is', null)
+        .where(hasAlbumAccess(ownerId, 'album.id'))
+        .groupBy('album.parentAlbumId')
+        .execute(),
+      this.db
+        .selectFrom('album')
+        .innerJoin('album_closure as ac', (join) => join.onRef('ac.id_descendant', '=', 'album.id'))
+        .innerJoin('album_asset as aa', (join) => join.onRef('aa.albumId', '=', 'album.id'))
+        .innerJoin('asset', (join) => join.onRef('asset.id', '=', 'aa.assetId'))
+        .select('ac.id_ancestor as albumId')
+        .select((eb) => sql<number>`count(distinct ${eb.ref('asset.id')})::int`.as('assetCountTotal'))
+        .where('ac.id_ancestor', 'in', albumIds)
+        .where('album.deletedAt', 'is', null)
+        .where('asset.deletedAt', 'is', null)
+        .where('asset.visibility', 'in', [sql.lit(AssetVisibility.Archive), sql.lit(AssetVisibility.Timeline)])
+        .where(hasAlbumAccess(ownerId, 'album.id'))
+        .groupBy('ac.id_ancestor')
+        .execute(),
+    ]);
+
+    const counts = new Map<string, AlbumSubtreeCount>();
+    for (const albumId of albumIds) {
+      counts.set(albumId, { albumId, subAlbumCount: 0, assetCountTotal: 0 });
+    }
+    for (const row of subAlbums) {
+      if (row.albumId !== null) {
+        const entry = counts.get(row.albumId);
+        if (entry) {
+          entry.subAlbumCount = row.subAlbumCount;
+        }
+      }
+    }
+    for (const row of assets) {
+      const entry = counts.get(row.albumId);
+      if (entry) {
+        entry.assetCountTotal = row.assetCountTotal;
+      }
+    }
+
+    return [...counts.values()];
   }
 
   private buildAlbumBaseQuery(
@@ -578,12 +642,14 @@ export class AlbumRepository {
    * - Removing thumbnails from albums without assets
    * - Removing references of thumbnails to assets outside the album
    * - Setting a thumbnail when none is set and the album contains assets
+   * - For albums without their own assets (folders that only hold sub-albums),
+   *   tracking the newest asset anywhere in their subtree
    *
    * @returns Amount of updated album thumbnails or undefined when unknown
    */
   async updateThumbnails(): Promise<number | undefined> {
-    // Subquery for getting a new thumbnail.
-
+    // Albums that contain their own assets keep the existing behavior: fill in
+    // a thumbnail when unset, repair it when the referenced asset is gone.
     const result = await this.db
       .updateTable('album')
       .set((eb) => ({
@@ -593,26 +659,49 @@ export class AlbumRepository {
           .limit(sql.lit(1)),
       }))
       .where((eb) =>
-        eb.or([
-          eb.and([
-            eb('albumThumbnailAssetId', 'is', null),
-            eb.exists(this.updateThumbnailBuilder(eb).select(sql`1`.as('1'))), // Has assets
-          ]),
-          eb.and([
-            eb('albumThumbnailAssetId', 'is not', null),
-            eb.not(
-              eb.exists(
-                this.updateThumbnailBuilder(eb)
-                  .select(sql`1`.as('1'))
-                  .whereRef('album.albumThumbnailAssetId', '=', 'album_asset.assetId'), // Has invalid assets
+        eb.and([
+          eb.exists(this.updateThumbnailBuilder(eb).select(sql`1`.as('1'))), // Has own assets
+          eb.or([
+            eb.and([
+              eb('albumThumbnailAssetId', 'is', null),
+              eb.exists(this.updateThumbnailBuilder(eb).select(sql`1`.as('1'))), // Has assets
+            ]),
+            eb.and([
+              eb('albumThumbnailAssetId', 'is not', null),
+              eb.not(
+                eb.exists(
+                  this.updateThumbnailBuilder(eb)
+                    .select(sql`1`.as('1'))
+                    .whereRef('album.albumThumbnailAssetId', '=', 'album_asset.assetId'), // Has invalid assets
+                ),
               ),
-            ),
+            ]),
           ]),
         ]),
       )
       .execute();
 
-    return Number(result[0].numUpdatedRows);
+    // Albums without their own assets follow the newest asset in their whole
+    // subtree, so a parent that only holds sub-albums still gets a cover, and
+    // keeps up as its descendants gain new assets.
+    const subtreeThumbnail = (eb: ExpressionBuilder<DB, 'album'>) =>
+      this.subtreeThumbnailBuilder(eb)
+        .select('album_asset.assetId')
+        .orderBy('asset.fileCreatedAt', 'desc')
+        .limit(sql.lit(1));
+
+    const subtreeResult = await this.db
+      .updateTable('album')
+      .set((eb) => ({ albumThumbnailAssetId: subtreeThumbnail(eb) }))
+      .where((eb) =>
+        eb.and([
+          eb.not(eb.exists(this.updateThumbnailBuilder(eb).select(sql`1`.as('1')))), // No own assets
+          sql`"album"."albumThumbnailAssetId" IS DISTINCT FROM (${subtreeThumbnail(eb)})`,
+        ]),
+      )
+      .execute();
+
+    return Number(result[0].numUpdatedRows) + Number(subtreeResult[0].numUpdatedRows);
   }
 
   private updateThumbnailBuilder(eb: ExpressionBuilder<DB, 'album'>) {
@@ -622,6 +711,18 @@ export class AlbumRepository {
         join.onRef('album_asset.assetId', '=', 'asset.id').on('asset.deletedAt', 'is', null),
       )
       .whereRef('album_asset.albumId', '=', 'album.id');
+  }
+
+  // Assets anywhere in the album's subtree. Every album is its own ancestor via
+  // the `album_closure` self row, so the album itself is included.
+  private subtreeThumbnailBuilder(eb: ExpressionBuilder<DB, 'album'>) {
+    return eb
+      .selectFrom('album_asset')
+      .innerJoin('asset', (join) =>
+        join.onRef('album_asset.assetId', '=', 'asset.id').on('asset.deletedAt', 'is', null),
+      )
+      .innerJoin('album_closure', (join) => join.onRef('album_closure.id_descendant', '=', 'album_asset.albumId'))
+      .whereRef('album_closure.id_ancestor', '=', 'album.id');
   }
 
   /**

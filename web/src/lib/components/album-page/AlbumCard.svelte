@@ -65,7 +65,13 @@
     <span class="flex gap-2 text-sm dark:text-immich-dark-fg" data-testid="album-details">
       {#if showItemCount}
         <p>
-          {$t('items_count', { values: { count: album.assetCount } })}
+          {#if album.subAlbumCount > 0}
+            {$t('sub_albums_and_items', {
+              values: { subAlbums: album.subAlbumCount, count: album.assetCountTotal },
+            })}
+          {:else}
+            {$t('items_count', { values: { count: album.assetCount } })}
+          {/if}
         </p>
       {/if}
 
