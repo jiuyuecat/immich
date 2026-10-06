@@ -76,6 +76,7 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
     required String title,
     String? description,
     List<String> assetIds = const [],
+    String? parentAlbumId,
   }) async {
     try {
       final currentUser = ref.read(currentUserProvider);
@@ -88,6 +89,7 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
         owner: currentUser,
         description: description,
         assetIds: assetIds,
+        parentAlbumId: parentAlbumId,
       );
 
       state = state.copyWith(albums: [...state.albums, album]);
@@ -106,6 +108,7 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
     required String title,
     String? description,
     Iterable<BaseAsset> assets = const [],
+    String? parentAlbumId,
   }) async {
     try {
       final currentUser = ref.read(currentUserProvider);
@@ -119,6 +122,7 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
         owner: currentUser,
         description: description,
         assetIds: candidates.remoteAssetIds,
+        parentAlbumId: parentAlbumId,
       );
 
       state = state.copyWith(albums: [...state.albums, album]);
@@ -176,6 +180,22 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
     final newOrder = currentAlbum.order == AlbumAssetOrder.asc ? AlbumAssetOrder.desc : AlbumAssetOrder.asc;
 
     return updateAlbum(albumId, order: newOrder);
+  }
+
+  /// Re-parents an album. Pass `null` to move it back to the top level.
+  Future<RemoteAlbum?> moveAlbum(String albumId, {required String? parentAlbumId}) async {
+    try {
+      final movedAlbum = await _remoteAlbumService.moveAlbum(albumId, parentAlbumId: parentAlbumId);
+
+      state = state.copyWith(
+        albums: state.albums.map((album) => album.id == albumId ? movedAlbum : album).toList(),
+      );
+
+      return movedAlbum;
+    } catch (error, stack) {
+      _logger.severe('Failed to move album', error, stack);
+      rethrow;
+    }
   }
 
   Future<void> deleteAlbum(String albumId) async {
@@ -282,8 +302,8 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
     state = state.copyWith(albums: state.albums.map((album) => album.id == albumId ? updated : album).toList());
   }
 
-  Future<void> addUsers(String albumId, List<String> userIds) {
-    return _remoteAlbumService.addUsers(albumId: albumId, userIds: userIds);
+  Future<void> addUsers(String albumId, List<String> userIds, {bool includeSubAlbums = false}) {
+    return _remoteAlbumService.addUsers(albumId: albumId, userIds: userIds, includeSubAlbums: includeSubAlbums);
   }
 
   Future<void> removeUser(String albumId, String userId) {

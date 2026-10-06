@@ -52,6 +52,7 @@ class _AlbumsPageState extends ConsumerState<AlbumsPage> {
           showUploadButton: false,
         ),
         AlbumSelector(
+          rootOnly: true,
           onAlbumSelected: (album) {
             unawaited(context.router.push(RemoteAlbumRoute(album: album)));
           },

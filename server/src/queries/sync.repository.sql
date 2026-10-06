@@ -36,6 +36,7 @@ select distinct
   "album"."albumThumbnailAssetId" as "thumbnailAssetId",
   "album"."isActivityEnabled",
   "album"."order",
+  "album"."parentAlbumId",
   "album"."updateId"
 from
   "album" as "album"

@@ -18,6 +18,7 @@ import 'package:immich_mobile/providers/infrastructure/current_album.provider.da
 import 'package:immich_mobile/providers/infrastructure/remote_album.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
+import 'package:immich_mobile/utils/album_hierarchy.utils.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:immich_mobile/widgets/common/user_circle_avatar.dart';
 
@@ -31,6 +32,11 @@ class AlbumOptionsPage extends HookConsumerWidget {
     final sharedUsersAsync = ref.watch(remoteAlbumSharedUsersProvider(album.id));
     final userId = ref.watch(authProvider).userId;
     final activityEnabled = useState(album.isActivityEnabled);
+    final parentAlbumId = useState<String?>(album.parentAlbumId);
+    final allAlbums = ref.watch(remoteAlbumProvider).albums;
+    final currentParentAlbum = parentAlbumId.value == null
+        ? null
+        : allAlbums.where((a) => a.id == parentAlbumId.value).firstOrNull;
     final isOwner = album.ownerId == userId;
     final owner = isOwner ? ref.watch(currentUserProvider) : null;
     final allUsers = isOwner ? null : ref.watch(usersProvider);
@@ -70,9 +76,9 @@ class AlbumOptionsPage extends HookConsumerWidget {
     }
 
     Future<void> addUsers() async {
-      final newUsers = await context.pushRoute<List<String>>(UserSelectionRoute(album: album));
+      final result = await context.pushRoute<UserSelectionResult>(UserSelectionRoute(album: album));
 
-      if (newUsers == null || newUsers.isEmpty) {
+      if (result == null || result.userIds.isEmpty) {
         return;
       }
 
@@ -81,7 +87,9 @@ class AlbumOptionsPage extends HookConsumerWidget {
           return;
         }
 
-        await ref.read(remoteAlbumProvider.notifier).addUsers(album.id, newUsers);
+        await ref
+            .read(remoteAlbumProvider.notifier)
+            .addUsers(album.id, result.userIds, includeSubAlbums: result.includeSubAlbums);
         ref.invalidate(remoteAlbumSharedUsersProvider(album.id));
         if (!context.mounted) {
           return;
@@ -89,7 +97,7 @@ class AlbumOptionsPage extends HookConsumerWidget {
 
         ImmichToast.show(
           context: context,
-          msg: context.t.users_added_to_album_count(count: newUsers.length),
+          msg: context.t.users_added_to_album_count(count: result.userIds.length),
           toastType: ToastType.success,
         );
       } catch (e) {
@@ -98,6 +106,70 @@ class AlbumOptionsPage extends HookConsumerWidget {
         }
 
         ImmichToast.show(context: context, msg: "Failed to add users to album: $e", toastType: ToastType.error);
+      }
+    }
+
+    /// Opens the parent picker. Only albums owned by the current user are valid
+    /// targets (server side the owner of both albums must match), and neither
+    /// this album nor any of its descendants can be chosen.
+    Future<void> moveAlbum() async {
+      final albums = ref.read(remoteAlbumProvider).albums;
+      final excluded = albumSubtreeIds(albums, album.id);
+      final candidates = albums.where((a) => a.ownerId == userId && !excluded.contains(a.id)).toList();
+
+      final target = await showModalBottomSheet<_MoveTarget>(
+        backgroundColor: context.colorScheme.surfaceContainer,
+        isScrollControlled: true,
+        context: context,
+        builder: (context) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(context.t.move_album, style: context.textTheme.titleMedium),
+              ),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    _MoveTargetTile(
+                      label: context.t.no_parent_album,
+                      selected: parentAlbumId.value == null,
+                      onTap: () => Navigator.of(context).pop(const _MoveTarget(null)),
+                    ),
+                    for (final candidate in candidates)
+                      _MoveTargetTile(
+                        label: albumPathLabel(albums, candidate),
+                        selected: parentAlbumId.value == candidate.id,
+                        onTap: () => Navigator.of(context).pop(_MoveTarget(candidate.id)),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (target == null || target.parentAlbumId == parentAlbumId.value) {
+        return;
+      }
+
+      try {
+        await ref.read(remoteAlbumProvider.notifier).moveAlbum(album.id, parentAlbumId: target.parentAlbumId);
+        parentAlbumId.value = target.parentAlbumId;
+        if (!context.mounted) {
+          return;
+        }
+
+        ImmichToast.show(context: context, msg: context.t.album_info_updated, toastType: ToastType.success);
+      } catch (_) {
+        if (!context.mounted) {
+          return;
+        }
+
+        ImmichToast.show(context: context, msg: context.t.errors.unable_to_update_album_info, toastType: ToastType.error);
       }
     }
 
@@ -237,6 +309,20 @@ class AlbumOptionsPage extends HookConsumerWidget {
             buildSectionTitle(context.t.shared_album_section_people_title),
             if (isOwner) ...[
               ListTile(
+                leading: const Icon(Icons.drive_file_move_outlined),
+                title: Text(context.t.move_album),
+                subtitle: Text(
+                  currentParentAlbum == null
+                      ? context.t.no_parent_album
+                      : albumPathLabel(allAlbums, currentParentAlbum),
+                  style: context.textTheme.labelLarge?.copyWith(color: context.colorScheme.onSurfaceSecondary),
+                ),
+                onTap: () async => moveAlbum(),
+              ),
+              const Divider(indent: 16),
+            ],
+            if (isOwner) ...[
+              ListTile(
                 leading: const Icon(Icons.person_add_rounded),
                 title: Text(context.t.invite_people),
                 onTap: () async => addUsers(),
@@ -248,6 +334,35 @@ class AlbumOptionsPage extends HookConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Selected destination of the "move to…" picker. `parentAlbumId == null`
+/// means the top level; a `null` [_MoveTarget] instead means "dismissed".
+class _MoveTarget {
+  final String? parentAlbumId;
+
+  const _MoveTarget(this.parentAlbumId);
+}
+
+class _MoveTargetTile extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _MoveTargetTile({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(
+        selected ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded,
+        color: selected ? context.primaryColor : context.colorScheme.onSurfaceSecondary,
+      ),
+      title: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
+      selected: selected,
+      onTap: onTap,
     );
   }
 }

@@ -30333,6 +30333,13 @@
           "order": {
             "$ref": "#/components/schemas/AssetOrder"
           },
+          "parentAlbumId": {
+            "description": "Parent album ID",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
           "thumbnailAssetId": {
             "description": "Thumbnail asset ID",
             "nullable": true,
@@ -30353,6 +30360,7 @@
           "isActivityEnabled",
           "name",
           "order",
+          "parentAlbumId",
           "thumbnailAssetId",
           "updatedAt"
         ],

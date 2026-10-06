@@ -8,6 +8,7 @@ import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/extensions/asyncvalue_extensions.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
+import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/remote_album.provider.dart';
@@ -43,6 +44,8 @@ final usersProvider = FutureProvider.autoDispose<List<UserDto>>((ref) async {
   return users;
 });
 
+typedef UserSelectionResult = ({List<String> userIds, bool includeSubAlbums});
+
 @RoutePage()
 class UserSelectionPage extends HookConsumerWidget {
   final RemoteAlbum album;
@@ -54,9 +57,14 @@ class UserSelectionPage extends HookConsumerWidget {
     final AsyncValue<List<UserDto>> suggestedShareUsers = ref.watch(usersProvider);
     final sharedUsers = ref.watch(remoteAlbumSharedUsersProvider(album.id));
     final sharedUsersList = useState<Set<UserDto>>({});
+    final includeSubAlbums = useState(false);
 
     void addNewUsersHandler() {
-      unawaited(context.maybePop(sharedUsersList.value.map((e) => e.id).toList()));
+      final result = (
+        userIds: sharedUsersList.value.map((e) => e.id).toList(),
+        includeSubAlbums: includeSubAlbums.value,
+      );
+      unawaited(context.maybePop<UserSelectionResult>(result));
     }
 
     Widget buildTileIcon(UserDto user) {
@@ -83,6 +91,18 @@ class UserSelectionPage extends HookConsumerWidget {
       }
       return ListView(
         children: [
+          SwitchListTile.adaptive(
+            value: includeSubAlbums.value,
+            onChanged: (value) => includeSubAlbums.value = value,
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            title: Text(context.t.include_sub_albums, style: context.textTheme.bodyLarge),
+            subtitle: Text(
+              context.t.include_sub_albums_description,
+              style: context.textTheme.labelSmall?.copyWith(color: context.colorScheme.onSurfaceSecondary),
+            ),
+          ),
+          const Divider(height: 1),
           Wrap(children: [...usersChip]),
           Padding(
             padding: const EdgeInsets.all(16.0),

@@ -247,6 +247,7 @@ const SyncAlbumV2Schema = z
     thumbnailAssetId: z.string().nullable().describe('Thumbnail asset ID'),
     isActivityEnabled: z.boolean().describe('Is activity enabled'),
     order: AssetOrderSchema,
+    parentAlbumId: z.uuidv4().nullable().describe('Parent album ID'),
   })
   .meta({ id: 'SyncAlbumV2' });
 

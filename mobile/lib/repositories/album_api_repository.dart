@@ -18,6 +18,7 @@ class AlbumApiRepository extends ApiRepository {
     UserDto owner, {
     required Iterable<String> assetIds,
     String? description,
+    String? parentAlbumId,
   }) async {
     final responseDto = await checkNull(
       _api.createAlbum(
@@ -27,8 +28,19 @@ class AlbumApiRepository extends ApiRepository {
               ? const Optional.absent()
               : Optional.present(description.isEmpty ? null : description),
           assetIds: Optional.present(assetIds.toList()),
+          parentAlbumId: parentAlbumId == null ? const Optional.absent() : Optional.present(parentAlbumId),
         ),
       ),
+    );
+
+    return responseDto.toRemoteAlbum(owner);
+  }
+
+  /// Moves an album under [parentAlbumId]. A `null` parent moves it back to the
+  /// top level, so the value is always sent explicitly.
+  Future<RemoteAlbum> moveAlbum(String albumId, UserDto owner, String? parentAlbumId) async {
+    final responseDto = await checkNull(
+      _api.updateAlbumInfo(albumId, UpdateAlbumDto(parentAlbumId: Optional.present(parentAlbumId))),
     );
 
     return responseDto.toRemoteAlbum(owner);
@@ -107,8 +119,10 @@ class AlbumApiRepository extends ApiRepository {
     return _api.deleteAlbum(albumId);
   }
 
-  Future<void> addUsers(String albumId, Iterable<String> userIds) async {
-    final albumUsers = userIds.map((userId) => AlbumUserAddDto(userId: userId)).toList();
+  Future<void> addUsers(String albumId, Iterable<String> userIds, {bool includeSubAlbums = false}) async {
+    final albumUsers = userIds
+        .map((userId) => AlbumUserAddDto(userId: userId, includeSubAlbums: Optional.present(includeSubAlbums)))
+        .toList();
     await checkNull(_api.addUsersToAlbum(albumId, AddUsersDto(albumUsers: albumUsers)));
   }
 
@@ -139,6 +153,7 @@ extension on AlbumResponseDto {
       order: order.orElse(null) == AssetOrder.asc ? AlbumAssetOrder.asc : AlbumAssetOrder.desc,
       assetCount: assetCount,
       isShared: albumUsers.length > 2,
+      parentAlbumId: parentAlbumId,
     );
   }
 }

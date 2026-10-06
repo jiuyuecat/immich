@@ -120,16 +120,30 @@ class RemoteAlbumService {
     required UserDto owner,
     required List<String> assetIds,
     String? description,
+    String? parentAlbumId,
   }) async {
     final album = await _albumApiRepository.createDriftAlbum(
       title,
       owner,
       description: description,
       assetIds: assetIds,
+      parentAlbumId: parentAlbumId,
     );
     await _repository.create(album, assetIds);
 
     return album;
+  }
+
+  /// Re-parents an album. A `null` [parentAlbumId] moves it back to the top
+  /// level. The server rejects cycles and deeper-than-owner moves.
+  Future<RemoteAlbum> moveAlbum(String albumId, {required String? parentAlbumId}) async {
+    final owner = await _repository.getOwner(albumId);
+    final movedAlbum = await _albumApiRepository.moveAlbum(albumId, owner, parentAlbumId);
+
+    // Update the local database
+    await _repository.updateAlbum(movedAlbum);
+
+    return movedAlbum;
   }
 
   Future<RemoteAlbum> updateAlbum(
@@ -290,8 +304,12 @@ class RemoteAlbumService {
     await _repository.deleteAlbum(albumId);
   }
 
-  Future<void> addUsers({required String albumId, required List<String> userIds}) async {
-    await _albumApiRepository.addUsers(albumId, userIds);
+  Future<void> addUsers({
+    required String albumId,
+    required List<String> userIds,
+    bool includeSubAlbums = false,
+  }) async {
+    await _albumApiRepository.addUsers(albumId, userIds, includeSubAlbums: includeSubAlbums);
 
     return _repository.addUsers(albumId, userIds);
   }

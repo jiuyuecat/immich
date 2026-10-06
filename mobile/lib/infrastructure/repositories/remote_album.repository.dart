@@ -171,6 +171,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
         thumbnailAssetId: Value(album.thumbnailAssetId ?? (assetIds.isNotEmpty ? assetIds.first : null)),
         isActivityEnabled: Value(album.isActivityEnabled),
         order: Value(album.order),
+        parentAlbumId: Value(album.parentAlbumId),
       );
 
       await _db.remoteAlbumEntity.insertOne(entity);
@@ -206,6 +207,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
         thumbnailAssetId: Value(album.thumbnailAssetId),
         isActivityEnabled: Value(album.isActivityEnabled),
         order: Value(album.order),
+        parentAlbumId: Value(album.parentAlbumId),
       ),
     );
   }
@@ -587,6 +589,7 @@ extension on RemoteAlbumEntityData {
       assetCount: assetCount,
       ownerName: ownerName,
       isShared: isShared,
+      parentAlbumId: parentAlbumId,
     );
   }
 }

@@ -3400,6 +3400,8 @@ export type SyncAlbumV2 = {
     /** Album name */
     name: string;
     order: AssetOrder;
+    /** Parent album ID */
+    parentAlbumId: string | null;
     /** Thumbnail asset ID */
     thumbnailAssetId: string | null;
     /** Updated at */

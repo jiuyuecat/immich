@@ -9,7 +9,9 @@ import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/server_capability.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/presentation/pages/user_selection.page.dart';
 import 'package:immich_mobile/presentation/widgets/album/pending_uploads_banner.widget.dart';
+import 'package:immich_mobile/presentation/widgets/album/sub_albums.widget.dart';
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/remote_album_bottom_sheet.widget.dart';
 import 'package:immich_mobile/presentation/widgets/remote_album/album_option.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart';
@@ -22,6 +24,7 @@ import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:immich_mobile/widgets/common/remote_album_sliver_app_bar.dart';
+import 'package:sliver_tools/sliver_tools.dart';
 
 @RoutePage()
 class RemoteAlbumPage extends ConsumerStatefulWidget {
@@ -39,6 +42,13 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
   void initState() {
     super.initState();
     _album = widget.album;
+    // Sub-albums and the breadcrumb are derived from the album list, which may
+    // not be loaded yet when this page is opened directly (deep link, notification).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(ref.read(remoteAlbumProvider.notifier).refresh());
+      }
+    });
   }
 
   Future<void> addAssets(BuildContext context) async {
@@ -71,9 +81,9 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
   }
 
   Future<void> addUsers(BuildContext context) async {
-    final newUsers = await context.pushRoute<List<String>>(UserSelectionRoute(album: _album));
+    final result = await context.pushRoute<UserSelectionResult>(UserSelectionRoute(album: _album));
 
-    if (newUsers == null || newUsers.isEmpty) {
+    if (result == null || result.userIds.isEmpty) {
       return;
     }
 
@@ -82,7 +92,9 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
         return;
       }
 
-      await ref.read(remoteAlbumProvider.notifier).addUsers(_album.id, newUsers);
+      await ref
+          .read(remoteAlbumProvider.notifier)
+          .addUsers(_album.id, result.userIds, includeSubAlbums: result.includeSubAlbums);
       ref.invalidate(remoteAlbumSharedUsersProvider(_album.id));
       if (!context.mounted) {
         return;
@@ -90,7 +102,7 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
 
       ImmichToast.show(
         context: context,
-        msg: context.t.users_added_to_album_count(count: newUsers.length),
+        msg: context.t.users_added_to_album_count(count: result.userIds.length),
         toastType: ToastType.success,
       );
     } catch (e) {
@@ -203,7 +215,16 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
         currentRemoteAlbumScopedProvider.overrideWithValue(_album),
       ],
       child: Timeline(
-        topSliverWidget: PendingUploadsBanner(albumId: _album.id),
+        topSliverWidget: MultiSliver(
+          children: [
+            PendingUploadsBanner(albumId: _album.id),
+            AlbumBreadcrumb(album: _album),
+            SubAlbumsSliver(
+              album: _album,
+              onAlbumSelected: (album) => unawaited(context.router.push(RemoteAlbumRoute(album: album))),
+            ),
+          ],
+        ),
         appBar: FutureBuilder<bool>(
           future: ref
               .watch(remoteAlbumServiceProvider)
