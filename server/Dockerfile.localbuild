@@ -1,7 +1,11 @@
-# Fork build variant: identical to Dockerfile, but drops the plugin-core artifact.
-# The plugins stage needs binaryen from GitHub releases (via mise), which this
-# server cannot reach. Removing the two COPY --from=plugins lines makes that
-# stage unreachable, so BuildKit never builds it.
+# Fork build variant of server/Dockerfile for a server without GitHub access.
+#
+# Differences from the upstream Dockerfile:
+#   - MISE_DISABLE_TOOLS also disables `binaryen`, which mise would otherwise
+#     try to fetch from GitHub releases (unreachable here).
+#   - wasm-merge / wasm-opt are provided from the committed tarball
+#     ./server/binaryen-bins.tar.gz instead (static x86_64 binaries,
+#     binaryen version_124).
 
 FROM ghcr.io/immich-app/base-server-dev:202610021601@sha256:a97a4e83561eca4bee1a636d05642f354aefb8ceeb84c969f3ac372b4cde24a8 AS builder
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
@@ -80,11 +84,19 @@ COPY ./mise.lock ./mise.lock
 COPY ./packages/plugin-core/mise.toml ./packages/plugin-core/
 ENV MISE_TRUSTED_CONFIG_PATHS=/usr/src/app/mise.toml
 ENV MISE_DATA_DIR=/buildcache/mise
-ENV MISE_DISABLE_TOOLS=flutter
+ENV MISE_DISABLE_TOOLS=flutter,binaryen
 RUN --mount=type=cache,id=mise-tools-${TARGETPLATFORM},target=/buildcache/mise \
   mise install --locked
 
 COPY ./packages/plugin-core ./packages/plugin-core/
+
+# wasm-merge / wasm-opt come from the committed binaryen tarball: mise would
+# fetch binaryen from GitHub releases, which is not reachable from every host
+# that builds this image.
+COPY ./server/binaryen-bins.tar.gz /tmp/binaryen-bins.tar.gz
+RUN tar -xzf /tmp/binaryen-bins.tar.gz -C /usr/local/bin && \
+  chmod +x /usr/local/bin/wasm-merge /usr/local/bin/wasm-opt && \
+  rm /tmp/binaryen-bins.tar.gz
 
 # Build plugins
 RUN --mount=type=cache,id=pnpm,target=/buildcache/pnpm-store \
@@ -101,6 +113,8 @@ ENV NODE_ENV=production \
 COPY --from=server /output/server-pruned ./server
 COPY --from=web /usr/src/app/web/build /build/www
 COPY --from=cli /output/cli-pruned ./cli
+COPY --from=plugins /usr/src/app/packages/plugin-core/dist /build/plugins/immich-plugin-core/dist
+COPY --from=plugins /usr/src/app/packages/plugin-core/manifest.json /build/plugins/immich-plugin-core/manifest.json
 RUN ln -s ../../cli/bin/immich server/bin/immich
 COPY LICENSE /licenses/LICENSE.txt
 COPY LICENSE /LICENSE
